@@ -42,7 +42,8 @@ body:has(dialog[open]) { overflow: hidden; }
   .title-group { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   h1 { font-size: 34px; }
   .title-group select { max-width: 100%; }
-  .flow-panel .tools { display: grid; grid-template-columns: 44px repeat(3, minmax(0,1fr)); gap: 8px; }
+  .flow-panel .tools { display: grid; grid-template-columns: minmax(105px,1.25fr) repeat(3, minmax(0,1fr)); gap: 8px; }
+  .data-manager-trigger { justify-content: center; white-space: normal; font-size: 10px; line-height: 1.25; }
   .quick-entry { min-height: 44px; padding: 8px 6px; justify-content: center; font-size: 12px; white-space: normal; }
   .quick-entry.credit { min-height: 44px; }
   .icon { width: 44px; height: 44px; }
@@ -154,6 +155,10 @@ body:has(dialog[open]) { overflow: hidden; }
   .card-preview small { max-width: calc(100% - 35px); overflow-wrap: anywhere; }
   .color-options { justify-content: space-between; gap: 6px; flex-wrap: wrap; }
   .color-options button { width: 38px; height: 38px; }
+  .data-action { grid-template-columns: 36px minmax(0,1fr) auto; gap: 10px; padding: 13px; }
+  .data-action-icon { width: 36px; height: 36px; border-radius: 11px; font-size: 17px; }
+  .import-preview-heading { display: block; }
+  .import-preview-heading small { display: block; max-width: none; margin-top: 5px; text-align: left; }
 }
 
 @media (max-width: 400px) {
@@ -181,6 +186,8 @@ body:has(dialog[open]) { overflow: hidden; }
   article { padding: 20px 17px; }
   .revenue strong { font-size: 26px; }
   .growth { padding: 9px; font-size: 10px; }
+  .data-manager-trigger { padding: 9px; }
+  .data-manager-trigger span { display: none; }
 }
 
 @media (max-height: 500px) and (max-width: 950px) {

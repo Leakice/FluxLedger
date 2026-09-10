@@ -6,11 +6,12 @@ import { flowChart } from './charts';
 import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel } from './ledger';
 import EntryDialog from './components/EntryDialog.vue';
 import CardDialog from './components/CardDialog.vue';
+import DataManagerDialog from './components/DataManagerDialog.vue';
 
 const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}};
 const entries=ref(read('cascade-transactions-v1',seed));
 const bankCards=ref(read('fluxledger-cards-v1',defaultCards));
-const entryDialog=ref(null), cardDialog=ref(null), recordKind=ref('expense');
+const entryDialog=ref(null), cardDialog=ref(null), dataDialog=ref(null), recordKind=ref('expense');
 const language=ref(localStorage.getItem('cascade-language')||'en');
 const dark=ref(localStorage.getItem('cascade-theme')==='dark');
 const page=ref('Analytics'), report=ref('Overview'), period=ref('month'), month=ref('2026-09');
@@ -59,7 +60,7 @@ function saveEntry(entry){const existing=entries.value.findIndex(e=>e.id===entry
 function saveCard(card){if(card.id){const index=bankCards.value.findIndex(c=>c.id===card.id);bankCards.value[index]=card;}else{card.id='card-'+Date.now();bankCards.value.push(card);cards.value.push(card.id)}toast('Card saved')}
 function remove(entry){deleted.value=entry;entries.value=entries.value.filter(e=>e.id!==entry.id);toast('Transaction deleted')}
 function undo(){if(deleted.value){entries.value.push(deleted.value);deleted.value=null;notification.value=''}}
-function exportCsv(){const cell=v=>'"'+String(v).replace(/^([=+@-])/,"'$1").replaceAll('"','""')+'"';const csv='\uFEFF'+[['Description','Type','Category','Date','Card','Amount'].map(t),...(page.value==='Transactions'||page.value==='History'?rows.value:filtered.value).map(e=>[e.description,t(entryKinds.find(k=>k.type===e.type)?.label||'Expense'),t(e.category),e.date,cardName(e.card),e.amount])].map(r=>r.map(cell).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`cascade-${month.value}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Transactions exported')}
+function importData(payload){entries.value=payload.entries;bankCards.value=payload.cards;cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='expense';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
 watch(bankCards,value=>localStorage.setItem('fluxledger-cards-v1',JSON.stringify(value)),{deep:true});
 watch(entries,value=>localStorage.setItem('cascade-transactions-v1',JSON.stringify(value)),{deep:true});
 watch(language,value=>{localStorage.setItem('cascade-language',value);document.documentElement.lang=value==='zh'?'zh-CN':'en';document.title=value==='zh'?'Cascade — 本地记账':'Cascade — Money in motion'},{immediate:true});
@@ -80,7 +81,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
   <main>
     <section v-if="page==='Analytics'||page==='Dashboard'">
       <div class="workspace"><div class="flow-panel">
-        <div class="section-heading"><div class="title-group"><h1>{{ t('Money Flow') }}</h1><select v-model="chartType" :aria-label="t('Chart type')"><option v-for="item in ['Sankey diagram','Category breakdown']" :key="item" :value="item">{{ t(item) }}</option></select></div><div class="tools"><button class="icon" :title="t('Export transactions')" @click="exportCsv"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H5V3h2m7 0v5h5M12 17V10m-3 3 3-3 3 3"/></svg></button><button v-for="kind in entryKinds" :key="kind.type" class="quick-entry" :class="kind.type" :title="t(kind.action)" @click="openForm(kind.type)"><span>{{ kind.icon }}</span>{{ t(kind.label) }}</button></div></div>
+        <div class="section-heading"><div class="title-group"><h1>{{ t('Money Flow') }}</h1><select v-model="chartType" :aria-label="t('Chart type')"><option v-for="item in ['Sankey diagram','Category breakdown']" :key="item" :value="item">{{ t(item) }}</option></select></div><div class="tools"><button class="data-manager-trigger" :title="t('Data management')" :aria-label="t('Data management')" @click="dataDialog.open()"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/></svg><span>{{ t('Data management') }}</span></button><button v-for="kind in entryKinds" :key="kind.type" class="quick-entry" :class="kind.type" :title="t(kind.action)" @click="openForm(kind.type)"><span>{{ kind.icon }}</span>{{ t(kind.label) }}</button></div></div>
         <p class="chart-scroll-hint">↔ {{ t('Swipe to explore the money flow') }}</p><div class="flow-scroll" tabindex="0" role="region" :aria-label="t('Money flow chart, scroll horizontally')"><div id="flow-chart" v-html="flow"/></div>
         <div class="flow-footer"><span><i class="live-dot"/>{{ t('Income + credit limit · capacity, not cash balance') }}</span><span>{{ periodLabel }} ↗</span></div><p v-if="flowModel.gap>0" class="funding-note">{{ t('Expenses above recorded funding') }}: {{ money(flowModel.gap) }}</p>
       </div>
@@ -99,7 +100,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
       </section>
     </section>
     <section v-else id="transactions">
-      <div class="section-heading"><div><span class="eyebrow">{{ t('YOUR EVERYDAY MONEY') }}</span><h1>{{ t(page==='History'?'Transaction history':'Transactions') }}</h1></div><button class="icon" :title="t('Export transactions')" @click="exportCsv">↥</button></div>
+      <div class="section-heading"><div><span class="eyebrow">{{ t('YOUR EVERYDAY MONEY') }}</span><h1>{{ t(page==='History'?'Transaction history':'Transactions') }}</h1></div><button class="data-manager-trigger" :title="t('Data management')" :aria-label="t('Data management')" @click="dataDialog.open()"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/></svg><span>{{ t('Data management') }}</span></button></div>
       <div class="entry-portals">
         <div v-for="kind in entryKinds" :key="kind.type" class="entry-portal" :class="[kind.type,{active:recordKind===kind.type&&page!=='History'}]">
           <button class="portal-select" :aria-pressed="recordKind===kind.type&&page!=='History'" @click="recordKind=kind.type;page='Transactions';category='All categories';search=''"><span class="portal-icon">{{ kind.icon }}</span><span><small>{{ t(kind.label) }}</small><strong>{{ money(kind.type==='credit'?totalCredit:periodEntries.filter(e=>e.type===kind.type).reduce((s,e)=>s+e.amount,0)) }}</strong></span><span class="portal-arrow">↗</span></button>
@@ -127,5 +128,6 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
   <footer><span class="footer-brand">cascade<span>®</span></span><span>{{ t('A clear view of your financial world.') }}</span><span>{{ t('Local workspace') }} <i class="live-dot"/></span></footer>
   <EntryDialog ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
   <CardDialog ref="cardDialog" :t="t" @save="saveCard"/>
+  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :t="t" @import="importData" @notify="toast"/>
   <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button></div>
 </template>
