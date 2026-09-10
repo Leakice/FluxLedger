@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
 import { flowChart } from './charts';
@@ -45,7 +45,11 @@ const sources=computed(()=>{const totals={};filtered.value.filter(e=>e.type===(r
 const percent=i=>{const total=sources.value.reduce((s,e)=>s+e[1],0);return total?Math.round((sources.value[i]?.[1]||0)/total*100):0};
 const donutStyle=computed(()=>({background:`conic-gradient(#ff852b 0 ${percent(0)}%,var(--panel) ${percent(0)}% ${Math.min(100,percent(0)+1)}%,#e6e9ea ${Math.min(100,percent(0)+1)}% 100%)`}));
 const flowModel=computed(()=>buildFlowModel(periodEntries.value,entries.value,bankCards.value.filter(c=>cards.value.includes(c.id)),asOf.value,category.value));
-const flow=computed(()=>flowChart(flowModel.value,chartType.value,t));
+const flowContainer=ref(null), flowWidth=ref(960);
+const flowObserver=new ResizeObserver(([entry])=>{flowWidth.value=entry.contentRect.width});
+watch(flowContainer,element=>{flowObserver.disconnect();if(element)flowObserver.observe(element)},{flush:'post'});
+onBeforeUnmount(()=>flowObserver.disconnect());
+const flow=computed(()=>flowChart(flowModel.value,chartType.value,t,flowWidth.value));
 const rows=computed(()=>(page.value==='History'?entries.value:recordKind.value==='credit'?entries.value.filter(e=>e.type==='credit'&&cards.value.includes(e.card)&&e.date<=asOf.value):periodEntries.value.filter(e=>e.type===recordKind.value&&matchesCategory(e))).filter(e=>(e.description+' '+t(e.category)+' '+e.category+' '+cardName(e.card)).toLowerCase().includes(search.value.toLowerCase())).slice().sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id));
 const months=computed(()=>Array.from({length:6},(_,i)=>{const d=new Date(month.value+'-01T12:00:00');d.setMonth(d.getMonth()-5+i);const prefix=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const data=entries.value.filter(e=>e.type!=='credit'&&e.date.startsWith(prefix)&&cards.value.includes(e.card)&&matchesCategory(e));return{label:dateLabel(prefix,true),income:data.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0),expense:data.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0),count:data.length}}));
 const chartMax=computed(()=>Math.max(...months.value.map(e=>Math.max(e.income,e.expense)),1000)*1.12);
@@ -82,7 +86,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
     <section v-if="page==='Analytics'||page==='Dashboard'">
       <div class="workspace"><div class="flow-panel">
         <div class="section-heading"><div class="title-group"><h1>{{ t('Money Flow') }}</h1><select v-model="chartType" :aria-label="t('Chart type')"><option v-for="item in ['Sankey diagram','Category breakdown']" :key="item" :value="item">{{ t(item) }}</option></select></div><div class="tools"><button class="data-manager-trigger" :title="t('Data management')" :aria-label="t('Data management')" @click="dataDialog.open()"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/></svg><span>{{ t('Data management') }}</span></button><button v-for="kind in entryKinds" :key="kind.type" class="quick-entry" :class="kind.type" :title="t(kind.action)" @click="openForm(kind.type)"><span>{{ kind.icon }}</span>{{ t(kind.label) }}</button></div></div>
-        <p class="chart-scroll-hint">↔ {{ t('Swipe to explore the money flow') }}</p><div class="flow-scroll" tabindex="0" role="region" :aria-label="t('Money flow chart, scroll horizontally')"><div id="flow-chart" v-html="flow"/></div>
+        <p v-if="chartType!=='Sankey diagram'" class="chart-scroll-hint">↔ {{ t('Swipe to explore the money flow') }}</p><div ref="flowContainer" class="flow-scroll" :class="{'is-sankey':chartType==='Sankey diagram'}" tabindex="0" role="region" :aria-label="t(chartType==='Sankey diagram'?'Money Flow':'Money flow chart, scroll horizontally')"><div id="flow-chart" v-html="flow"/></div>
         <div class="flow-footer"><span><i class="live-dot"/>{{ t('Income + credit limit · capacity, not cash balance') }}</span><span>{{ periodLabel }} ↗</span></div><p v-if="flowModel.gap>0" class="funding-note">{{ t('Expenses above recorded funding') }}: {{ money(flowModel.gap) }}</p>
       </div>
       <aside class="filter-panel" :class="{'is-expanded':filtersOpen}"><div class="aside-title"><h2 class="desktop-filter-title">{{ t('Filters') }}</h2><button class="mobile-filter-toggle" :aria-expanded="filtersOpen" aria-controls="filter-content" @click="filtersOpen=!filtersOpen"><span><strong>{{ t('Filters') }}</strong><small>{{ periodLabel }} · {{ cards.length }}/{{ bankCards.length }} {{ t('Cards') }} · {{ t(category) }}</small></span><span class="filter-chevron" aria-hidden="true">⌄</span></button><button class="icon" :title="t('Reset filters')" @click="reset">↺</button></div><div id="filter-content" class="filter-content">

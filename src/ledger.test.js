@@ -48,3 +48,30 @@ test('SVG escapes card names and never fabricates another income source',()=>{
  const empty=flowChart(buildFlowModel([],[],cards,'2026-09-30'),'Sankey diagram',s=>s);
  assert.ok(!/NaN|Infinity/.test(empty));
 });
+
+test('narrow Sankey keeps all three columns and wrapped labels inside colored nodes',()=>{
+ const model=buildFlowModel(entries,entries,[{...cards[0],name:'银行卡很长的名称 <script> & extra description',last4:'9999'}],'2026-09-30');
+ for(const width of [280,343,600,900]){
+  const svg=flowChart(model,'Sankey diagram',s=>s,width);
+  assert.ok(svg.includes(`viewBox="0 0 ${width} `));
+  assert.ok(!svg.includes('label-box'));
+  assert.ok(!svg.includes('<script>'));
+  assert.ok(svg.includes('9999'));
+  assert.ok(!/NaN|Infinity/.test(svg));
+  const groups=[...svg.matchAll(/<g class="flow-node">(.*?)<\/g>/g)].map(m=>m[1]);
+  const columns=new Set();
+  for(const group of groups){
+   const rect=group.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/);
+   const [x,y,w,h]=rect.slice(1).map(Number);
+   columns.add(x);
+   assert.ok(x>=0 && x+w<=width);
+   for(const span of group.matchAll(/<tspan x="([\d.]+)" y="([\d.]+)"/g)){
+    assert.equal(Number(span[1]),x+w/2);
+    assert.ok(Number(span[2])>y && Number(span[2])<y+h);
+   }
+  }
+  assert.equal(columns.size,3);
+  const positions=[...columns].sort((a,b)=>a-b);
+  assert.ok(Math.abs(positions[1]+Math.min(150,width*.27)/2-width/2)<.01);
+ }
+});
