@@ -31,6 +31,25 @@ test('legacy CSV import maps localized fields to the current cards',()=>{
   assert.equal(parsed.entries[0].amount,18.5);
 });
 
+test('legacy CSV import matches the complete card label instead of digits in its name',()=>{
+  const similarCards = [
+    { id: 'first', name: 'Account', last4: '1234', network: 'Visa', color: '#123456' },
+    { id: 'second', name: 'Account 1234', last4: '5678', network: 'Visa', color: '#654321' }
+  ];
+  const csv='Description,Type,Category,Date,Card,Amount\nLunch,Expense,Food & Drinks,2026-09-10,Account 1234 · 5678,18.50';
+  const parsed=parseDataFile(csv,{cards:similarCards});
+  assert.equal(parsed.entries[0].card,'second');
+});
+
+test('legacy CSV import rejects an ambiguous last-four-only card reference',()=>{
+  const duplicateLast4Cards = [
+    ...cards,
+    { id: 'another-card', name: 'Backup card', last4: '4329', network: 'Visa', color: '#123456' }
+  ];
+  const csv='Description,Type,Category,Date,Card,Amount\nLunch,Expense,Food & Drinks,2026-09-10,4329,18.50';
+  assert.throws(()=>parseDataFile(csv,{cards:duplicateLast4Cards}),/card that does not exist/);
+});
+
 test('import rejects transactions that reference an unknown card',()=>{
   const payload=JSON.stringify({transactions:[{...entries[0],card:'missing'}],cards});
   assert.throws(()=>parseDataFile(payload,{cards:[]}),/card that does not exist/);

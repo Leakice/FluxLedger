@@ -128,11 +128,13 @@ function parseCsv(text, cards) {
   if (Object.values(columns).some(index => index < 0) || !rows.length) fail('No transaction data found.');
   const resolveCard = value => {
     const target = value.trim();
-    const card = cards.find(item => item.id === target || item.last4 === target) ||
-      cards.find(item => target.includes(item.last4)) ||
-      cards.find(item => target.includes(item.id));
-    if (!card) fail('The file references a card that does not exist.');
-    return card.id;
+    const matches = cards.filter(item => {
+      const names = new Set([item.name, dictionary[item.name]].filter(Boolean));
+      return item.id === target || item.last4 === target ||
+        [...names].some(name => `${name} · ${item.last4}` === target);
+    });
+    if (matches.length !== 1) fail('The file references a card that does not exist.');
+    return matches[0].id;
   };
   const entries = rows.map((row, index) => ({
     id: Date.now() + index + 1,
