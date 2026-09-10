@@ -68,7 +68,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
 
 <template>
   <header>
-    <a class="brand" href="#" :aria-label="t('Cascade home')" @click.prevent="navigate('Analytics')"><svg viewBox="0 0 40 44"><path d="M4 3v19c0 8 9 13 17 15V20C11 17 7 10 4 3Zm18 5v17c8 3 12 9 14 16V23c0-7-6-12-14-15Z" fill="currentColor"/></svg></a>
+    <a class="brand" href="#" :aria-label="t('Cascade home')" @click.prevent="navigate('Analytics')"><img src="/assets/sankey-diagram-alt-svgrepo-com.svg" alt=""/></a>
     <nav><button v-for="item in ['Dashboard','Transactions','Analytics','History']" :key="item" :class="{active:page===item}" @click="navigate(item)">{{ t(item) }}</button></nav>
     <div class="header-right">
       <div class="language-switch" aria-label="Language / 语言"><button v-for="lang in ['en','zh']" :key="lang" :class="{selected:language===lang}" :aria-pressed="language===lang" @click="language=lang">{{ lang.toUpperCase() }}</button></div>
