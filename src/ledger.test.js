@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { creditLimit, periodEnd, buildFlowModel } from './ledger.js';
+import { creditLimit, periodEnd, buildFlowModel, creditAccountCards, withCreditAccountCards } from './ledger.js';
 import { flowChart } from './charts.js';
 const cards=[{id:'a',name:'Daily',last4:'1234',color:'#888'},{id:'b',name:'Travel',last4:'5678',color:'#555'}];
 const entries=[
@@ -17,6 +17,13 @@ test('credit limit uses latest effective snapshot, not the sum; future limits ex
  assert.equal(creditLimit(entries,'b','2026-09-30'),0);
  assert.equal(creditLimit([...entries,{id:7,type:'credit',card:'a',amount:0,date:'2026-09-03'}],'a','2026-09-30'),0);
 });
+test('every credit account has one corresponding card without duplicating existing cards',()=>{
+ const cards=withCreditAccountCards([{id:'credit-baitiao',name:'白条',last4:'9999',network:'Other',color:'#000'}]);
+ assert.equal(cards.length,creditAccountCards.length);
+ assert.equal(cards.find(card=>card.name==='白条').last4,'');
+ assert.deepEqual(cards.map(card=>card.name).sort(),creditAccountCards.map(card=>card.name).sort());
+});
+
 test('funding contains income and credit only; editing expenses never changes capacity',()=>{
  const model=buildFlowModel(entries.filter(e=>e.date.startsWith('2026-09')),entries,cards,'2026-09-30');
  assert.equal(model.income,125);assert.equal(model.credit,80);assert.equal(model.capacity,205);

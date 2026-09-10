@@ -4,10 +4,25 @@ export const entryKinds = [
   { type: 'credit', label: 'Credit limit', action: 'Set credit limit', icon: '◇' },
 ];
 
+export const creditAccountCards = [
+  { id: 'credit-baitiao', name: '白条', last4: '', noLast4: true, network: 'Other', color: '#8659e7' },
+  { id: 'credit-huabei', name: '花呗', last4: '', noLast4: true, network: 'Other', color: '#ed8d60' },
+  { id: 'credit-meituan', name: '美团月付', last4: '', noLast4: true, network: 'Other', color: '#19ac87' },
+  { id: 'credit-douyin', name: '抖音月付', last4: '', noLast4: true, network: 'Other', color: '#4c5868' },
+];
 export const defaultCards = [
   { id: '4329', name: 'Everyday card', last4: '4329', network: 'Visa', color: '#f4cf35' },
   { id: '8851', name: 'Lifestyle card', last4: '8851', network: 'Mastercard', color: '#2784f7' },
+  ...creditAccountCards,
 ];
+
+export function withCreditAccountCards(cards) {
+  const normalizedCards = cards.map(card => {
+    const creditCard = creditAccountCards.find(candidate => candidate.id === card.id || candidate.name === card.name);
+    return creditCard ? { ...card, ...creditCard } : card;
+  });
+  return [...normalizedCards, ...creditAccountCards.filter(creditCard => !normalizedCards.some(card => card.id === creditCard.id))];
+}
 
 export function creditLimit(entries, cardId, asOf) {
   const settings = entries.filter(e => e.type === 'credit' && e.card === cardId && e.date <= asOf);
