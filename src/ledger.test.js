@@ -23,6 +23,7 @@ test('every built-in credit and online-balance account has one no-last-four card
  assert.equal(cards.length,expected.length);
  assert.ok(cards.filter(card=>expected.some(expectedCard=>expectedCard.id===card.id)).every(card=>card.last4===''));
  assert.deepEqual(cards.map(card=>card.name).sort(),expected.map(card=>card.name).sort());
+ assert.ok(!withBuiltInAccountCards([],['online-wechat']).some(card=>card.id==='online-wechat'));
 });
 
 test('funding contains income and credit only; editing expenses never changes capacity',()=>{

@@ -3,14 +3,15 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
 import { flowChart } from './charts';
-import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards } from './ledger';
+import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard } from './ledger';
 import EntryDialog from './components/EntryDialog.vue';
 import CardDialog from './components/CardDialog.vue';
 import DataManagerDialog from './components/DataManagerDialog.vue';
 
 const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}};
 const entries=ref(read('cascade-transactions-v1',seed));
-const bankCards=ref(withBuiltInAccountCards(read('fluxledger-cards-v1',defaultCards)));
+const hiddenBuiltInCardIds=ref(read('fluxledger-hidden-built-in-cards-v1',[]));
+const bankCards=ref(withBuiltInAccountCards(read('fluxledger-cards-v1',defaultCards),hiddenBuiltInCardIds.value));
 const entryDialog=ref(null), cardDialog=ref(null), dataDialog=ref(null), recordKind=ref('expense');
 const language=ref(localStorage.getItem('cascade-language')||'en');
 const dark=ref(localStorage.getItem('cascade-theme')==='dark');
@@ -72,10 +73,17 @@ function saveEntry(entry){
   const existing=entries.value.findIndex(e=>e.id===entry.id);if(existing>=0)entries.value[existing]=entry;else entries.value.push({...entry,id:Date.now()});month.value=entry.date.slice(0,7);recordKind.value=entry.type;toast(existing>=0?'Transaction updated':'Transaction saved on this device')
 }
 function saveCard(card){if(card.id){const index=bankCards.value.findIndex(c=>c.id===card.id);bankCards.value[index]=card;}else{card.id='card-'+Date.now();bankCards.value.push(card);cards.value.push(card.id)}toast('Card saved')}
+function removeCard(id){
+  if(entries.value.some(entry=>entry.card===id)){toast('Delete linked entries first');return}
+  bankCards.value=bankCards.value.filter(card=>card.id!==id);cards.value=cards.value.filter(cardId=>cardId!==id);
+  if(isBuiltInAccountCard(id)&&!hiddenBuiltInCardIds.value.includes(id))hiddenBuiltInCardIds.value.push(id);
+  toast('Card deleted');
+}
 function remove(entry){deleted.value=entry;entries.value=entries.value.filter(e=>e.id!==entry.id);toast('Transaction deleted')}
 function undo(){if(deleted.value){entries.value.push(deleted.value);deleted.value=null;notification.value=''}}
-function importData(payload){entries.value=payload.entries;bankCards.value=withBuiltInAccountCards(payload.cards);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='expense';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
+function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.value=[];bankCards.value=withBuiltInAccountCards(payload.cards,hiddenBuiltInCardIds.value);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='expense';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
 watch(bankCards,value=>localStorage.setItem('fluxledger-cards-v1',JSON.stringify(value)),{deep:true});
+watch(hiddenBuiltInCardIds,value=>localStorage.setItem('fluxledger-hidden-built-in-cards-v1',JSON.stringify(value)),{deep:true});
 watch(entries,value=>localStorage.setItem('cascade-transactions-v1',JSON.stringify(value)),{deep:true});
 watch(language,value=>{localStorage.setItem('cascade-language',value);document.documentElement.lang=value==='zh'?'zh-CN':'en';document.title=value==='zh'?'Cascade — 本地记账':'Cascade — Money in motion'},{immediate:true});
 watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.setItem('cascade-theme',value?'dark':'light')},{immediate:true});
@@ -141,7 +149,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
   </main>
   <footer><span class="footer-brand">cascade<span>®</span></span><span>{{ t('A clear view of your financial world.') }}</span><span>{{ t('Local workspace') }} <i class="live-dot"/></span></footer>
   <EntryDialog ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
-  <CardDialog ref="cardDialog" :t="t" @save="saveCard"/>
+  <CardDialog ref="cardDialog" :t="t" @save="saveCard" @remove="removeCard"/>
   <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :t="t" @import="importData" @notify="toast"/>
   <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button></div>
 </template>

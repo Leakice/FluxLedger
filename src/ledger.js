@@ -20,6 +20,8 @@ export const onlineBalanceCards = [
 ];
 
 const builtInAccountCards = [...creditAccountCards, ...onlineBalanceCards];
+export const builtInAccountCardIds = new Set(builtInAccountCards.map(card => card.id));
+export const isBuiltInAccountCard = id => builtInAccountCardIds.has(id);
 
 export const defaultCards = [
   { id: '4329', name: 'Everyday card', last4: '4329', network: 'Visa', accountType: 'Savings card', color: '#f4cf35' },
@@ -27,12 +29,14 @@ export const defaultCards = [
   ...builtInAccountCards,
 ];
 
-export function withBuiltInAccountCards(cards) {
-  const normalizedCards = cards.map(card => {
-    const builtInCard = builtInAccountCards.find(candidate => candidate.id === card.id || candidate.name === card.name);
+export function withBuiltInAccountCards(cards, hiddenCardIds = []) {
+  const hiddenIds = new Set(hiddenCardIds);
+  const visibleBuiltInCards = builtInAccountCards.filter(card => !hiddenIds.has(card.id));
+  const normalizedCards = cards.filter(card => !hiddenIds.has(card.id)).map(card => {
+    const builtInCard = visibleBuiltInCards.find(candidate => candidate.id === card.id || candidate.name === card.name);
     return builtInCard ? { ...card, ...builtInCard } : card;
   });
-  return [...normalizedCards, ...builtInAccountCards.filter(builtInCard => !normalizedCards.some(card => card.id === builtInCard.id))];
+  return [...normalizedCards, ...visibleBuiltInCards.filter(builtInCard => !normalizedCards.some(card => card.id === builtInCard.id))];
 }
 export function creditLimit(entries, cardId, asOf) {
   const settings = entries.filter(e => e.type === 'credit' && e.card === cardId && e.date <= asOf);
