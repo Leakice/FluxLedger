@@ -3,14 +3,14 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
 import { flowChart } from './charts';
-import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withCreditAccountCards } from './ledger';
+import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards } from './ledger';
 import EntryDialog from './components/EntryDialog.vue';
 import CardDialog from './components/CardDialog.vue';
 import DataManagerDialog from './components/DataManagerDialog.vue';
 
 const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}};
 const entries=ref(read('cascade-transactions-v1',seed));
-const bankCards=ref(withCreditAccountCards(read('fluxledger-cards-v1',defaultCards)));
+const bankCards=ref(withBuiltInAccountCards(read('fluxledger-cards-v1',defaultCards)));
 const entryDialog=ref(null), cardDialog=ref(null), dataDialog=ref(null), recordKind=ref('expense');
 const language=ref(localStorage.getItem('cascade-language')||'en');
 const dark=ref(localStorage.getItem('cascade-theme')==='dark');
@@ -60,11 +60,21 @@ function toast(message){notification.value=message;clearTimeout(toastTimer);toas
 function navigate(next){page.value=next;if(next==='Dashboard')report.value='Overview'}
 function reset(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';toast('Filters reset')}
 function openForm(type='expense',entry=null){entryDialog.value.open(type,month.value+'-10',entry)}
-function saveEntry(entry){const existing=entries.value.findIndex(e=>e.id===entry.id);if(existing>=0)entries.value[existing]=entry;else entries.value.push({...entry,id:Date.now()});month.value=entry.date.slice(0,7);recordKind.value=entry.type;toast(existing>=0?'Transaction updated':'Transaction saved on this device')}
+function loanCardFor(borrower, currentCardId) {
+  const existing = bankCards.value.find(card => card.id === currentCardId && card.loanBorrower === borrower) || bankCards.value.find(card => card.loanBorrower === borrower);
+  if (existing) return existing.id;
+  const card = { id: 'loan-'+Date.now(), name: borrower, last4: '', noLast4: true, network: '借款', accountType: 'Credit card', loanBorrower: borrower, color: '#627084' };
+  bankCards.value.push(card);cards.value.push(card.id);
+  return card.id;
+}
+function saveEntry(entry){
+  if(entry.type==='credit'&&entry.description==='借款'&&entry.borrower){entry={...entry,card:loanCardFor(entry.borrower.trim(),entry.card),borrower:entry.borrower.trim()}}
+  const existing=entries.value.findIndex(e=>e.id===entry.id);if(existing>=0)entries.value[existing]=entry;else entries.value.push({...entry,id:Date.now()});month.value=entry.date.slice(0,7);recordKind.value=entry.type;toast(existing>=0?'Transaction updated':'Transaction saved on this device')
+}
 function saveCard(card){if(card.id){const index=bankCards.value.findIndex(c=>c.id===card.id);bankCards.value[index]=card;}else{card.id='card-'+Date.now();bankCards.value.push(card);cards.value.push(card.id)}toast('Card saved')}
 function remove(entry){deleted.value=entry;entries.value=entries.value.filter(e=>e.id!==entry.id);toast('Transaction deleted')}
 function undo(){if(deleted.value){entries.value.push(deleted.value);deleted.value=null;notification.value=''}}
-function importData(payload){entries.value=payload.entries;bankCards.value=withCreditAccountCards(payload.cards);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='expense';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
+function importData(payload){entries.value=payload.entries;bankCards.value=withBuiltInAccountCards(payload.cards);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='expense';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
 watch(bankCards,value=>localStorage.setItem('fluxledger-cards-v1',JSON.stringify(value)),{deep:true});
 watch(entries,value=>localStorage.setItem('cascade-transactions-v1',JSON.stringify(value)),{deep:true});
 watch(language,value=>{localStorage.setItem('cascade-language',value);document.documentElement.lang=value==='zh'?'zh-CN':'en';document.title=value==='zh'?'Cascade — 本地记账':'Cascade — Money in motion'},{immediate:true});
@@ -91,7 +101,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
       </div>
       <aside class="filter-panel" :class="{'is-expanded':filtersOpen}"><div class="aside-title"><h2 class="desktop-filter-title">{{ t('Filters') }}</h2><button class="mobile-filter-toggle" :aria-expanded="filtersOpen" aria-controls="filter-content" @click="filtersOpen=!filtersOpen"><span><strong>{{ t('Filters') }}</strong><small>{{ periodLabel }} · {{ cards.length }}/{{ bankCards.length }} {{ t('Cards') }} · {{ t(category) }}</small></span><span class="filter-chevron" aria-hidden="true">⌄</span></button><button class="icon" :title="t('Reset filters')" @click="reset">↺</button></div><div id="filter-content" class="filter-content">
         <label class="filter-label">{{ t('Time period') }}</label><div class="pills" id="period"><button :class="{active:period==='month'}" @click="period='month'">{{ t('Month') }}</button><button :class="{active:period==='year'}" @click="period='year'">{{ t('Year') }}</button><input id="month" type="month" :value="month" :aria-label="t('Select period')" @change="month=$event.target.value||'2026-09'"></div>
-        <div class="cards-label"><span>{{ t('Cards') }}</span><button class="text-button" @click="cardDialog.open()">{{ t('Add card') }} ＋</button></div><div class="bank-card-list"><div v-for="card in bankCards" :key="card.id" class="bank-card-row"><button class="bank-card-edit" :aria-label="t('Edit card')+' '+t(card.name)" @click="cardDialog.open(card)"><span class="credit mini-card" :style="{background:card.color}"><b>{{ card.network }}</b></span><span class="bank-details"><strong>{{ t(card.name) }}</strong><small v-if="card.last4">•••• {{ card.last4 }} <span class="edit-hint">✎</span></small></span></button><input v-model="cards" type="checkbox" :value="card.id" :aria-label="t('Filter card')+' '+t(card.name)"></div></div>
+        <div class="cards-label"><span>{{ t('Cards') }}</span><button class="text-button" @click="cardDialog.open()">{{ t('Add card') }} ＋</button></div><div class="bank-card-list"><div v-for="card in bankCards" :key="card.id" class="bank-card-row"><button class="bank-card-edit" :aria-label="t('Edit card')+' '+t(card.name)" @click="cardDialog.open(card)"><span class="credit mini-card" :style="{background:card.color}"><b>{{ t(card.network) }}</b></span><span class="bank-details"><strong>{{ t(card.name) }}</strong><small v-if="card.last4">•••• {{ card.last4 }} <span class="edit-hint">✎</span></small></span></button><input v-model="cards" type="checkbox" :value="card.id" :aria-label="t('Filter card')+' '+t(card.name)"></div></div>
         <label class="filter-label categories-label">{{ t('Categories') }}</label><div class="pills categories"><button v-for="item in filterCategories.slice(0,expanded?8:5)" :key="item" :class="{active:category===item}" @click="category=item">{{ t(item) }}</button><button class="show-more" @click="expanded=!expanded">{{ t(expanded?'Show less':'Show more') }}</button></div><div class="filter-note">{{ t('A little clarity. A better balance.') }}</div>
       </div></aside></div>
       <section class="reports"><div class="report-heading"><h2>{{ t('New report') }}</h2><div class="segmented"><button v-for="item in ['Overview','Income','Expenses']" :key="item" :class="{active:report===item}" @click="report=item">{{ t(item) }}</button></div><span class="report-date">{{ t('YOUR MONTH IN NUMBERS') }}</span></div>

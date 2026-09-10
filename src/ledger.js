@@ -5,25 +5,35 @@ export const entryKinds = [
 ];
 
 export const creditAccountCards = [
-  { id: 'credit-baitiao', name: '白条', last4: '', noLast4: true, network: 'Other', color: '#8659e7' },
-  { id: 'credit-huabei', name: '花呗', last4: '', noLast4: true, network: 'Other', color: '#ed8d60' },
-  { id: 'credit-meituan', name: '美团月付', last4: '', noLast4: true, network: 'Other', color: '#19ac87' },
-  { id: 'credit-douyin', name: '抖音月付', last4: '', noLast4: true, network: 'Other', color: '#4c5868' },
+  { id: 'credit-baitiao', name: '白条', last4: '', noLast4: true, network: 'Other', accountType: 'Credit card', color: '#8659e7' },
+  { id: 'credit-huabei', name: '花呗', last4: '', noLast4: true, network: 'Other', accountType: 'Credit card', color: '#ed8d60' },
+  { id: 'credit-meituan', name: '美团月付', last4: '', noLast4: true, network: 'Other', accountType: 'Credit card', color: '#19ac87' },
+  { id: 'credit-douyin', name: '抖音月付', last4: '', noLast4: true, network: 'Other', accountType: 'Credit card', color: '#4c5868' },
 ];
+
+export const onlineBalanceCards = [
+  { id: 'online-wechat', name: '微信余额', last4: '', noLast4: true, network: 'Online banking', accountType: 'Online banking', color: '#19ac87' },
+  { id: 'online-alipay', name: '支付宝余额', last4: '', noLast4: true, network: 'Online banking', accountType: 'Online banking', color: '#2784f7' },
+  { id: 'online-yuebao', name: '余额宝余额', last4: '', noLast4: true, network: 'Online banking', accountType: 'Online banking', color: '#f4cf35' },
+  { id: 'online-lingqiantong', name: '零钱通余额', last4: '', noLast4: true, network: 'Online banking', accountType: 'Online banking', color: '#19ac87' },
+  { id: 'online-xiaohebao', name: '支付宝小荷包', last4: '', noLast4: true, network: 'Online banking', accountType: 'Online banking', color: '#8659e7' },
+];
+
+const builtInAccountCards = [...creditAccountCards, ...onlineBalanceCards];
+
 export const defaultCards = [
-  { id: '4329', name: 'Everyday card', last4: '4329', network: 'Visa', color: '#f4cf35' },
-  { id: '8851', name: 'Lifestyle card', last4: '8851', network: 'Mastercard', color: '#2784f7' },
-  ...creditAccountCards,
+  { id: '4329', name: 'Everyday card', last4: '4329', network: 'Visa', accountType: 'Savings card', color: '#f4cf35' },
+  { id: '8851', name: 'Lifestyle card', last4: '8851', network: 'Mastercard', accountType: 'Savings card', color: '#2784f7' },
+  ...builtInAccountCards,
 ];
 
-export function withCreditAccountCards(cards) {
+export function withBuiltInAccountCards(cards) {
   const normalizedCards = cards.map(card => {
-    const creditCard = creditAccountCards.find(candidate => candidate.id === card.id || candidate.name === card.name);
-    return creditCard ? { ...card, ...creditCard } : card;
+    const builtInCard = builtInAccountCards.find(candidate => candidate.id === card.id || candidate.name === card.name);
+    return builtInCard ? { ...card, ...builtInCard } : card;
   });
-  return [...normalizedCards, ...creditAccountCards.filter(creditCard => !normalizedCards.some(card => card.id === creditCard.id))];
+  return [...normalizedCards, ...builtInAccountCards.filter(builtInCard => !normalizedCards.some(card => card.id === builtInCard.id))];
 }
-
 export function creditLimit(entries, cardId, asOf) {
   const settings = entries.filter(e => e.type === 'credit' && e.card === cardId && e.date <= asOf);
   settings.sort((a, b) => b.date.localeCompare(a.date) || Number(b.id) - Number(a.id));
