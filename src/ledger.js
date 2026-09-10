@@ -32,11 +32,27 @@ export const defaultCards = [
 export function withBuiltInAccountCards(cards, hiddenCardIds = []) {
   const hiddenIds = new Set(hiddenCardIds);
   const visibleBuiltInCards = builtInAccountCards.filter(card => !hiddenIds.has(card.id));
-  const normalizedCards = cards.filter(card => !hiddenIds.has(card.id)).map(card => {
-    const builtInCard = visibleBuiltInCards.find(candidate => candidate.id === card.id || candidate.name === card.name);
-    return builtInCard ? { ...card, ...builtInCard } : card;
-  });
-  return [...normalizedCards, ...visibleBuiltInCards.filter(builtInCard => !normalizedCards.some(card => card.id === builtInCard.id))];
+  const persistedCards = cards.filter(card => !hiddenIds.has(card.id));
+  const persistedIds = new Set(persistedCards.map(card => card.id));
+  const claimedBuiltInIds = new Set();
+  const seenIds = new Set();
+  const normalizedCards = [];
+
+  for (const card of persistedCards) {
+    // Stable IDs win. Name matching only migrates a legacy/user card when no
+    // persisted card already owns the built-in ID, and must retain that card's ID.
+    const builtInCard = visibleBuiltInCards.find(candidate => candidate.id === card.id) ||
+      visibleBuiltInCards.find(candidate => !persistedIds.has(candidate.id) && !claimedBuiltInIds.has(candidate.id) && candidate.name === card.name);
+    if (seenIds.has(card.id)) continue;
+    seenIds.add(card.id);
+    if (builtInCard) claimedBuiltInIds.add(builtInCard.id);
+    normalizedCards.push(builtInCard ? { ...builtInCard, ...card, id: card.id } : card);
+  }
+
+  for (const builtInCard of visibleBuiltInCards) {
+    if (!claimedBuiltInIds.has(builtInCard.id) && !seenIds.has(builtInCard.id)) normalizedCards.push({ ...builtInCard });
+  }
+  return normalizedCards;
 }
 export function creditLimit(entries, cardId, asOf) {
   const settings = entries.filter(e => e.type === 'credit' && e.card === cardId && e.date <= asOf);

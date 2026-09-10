@@ -42,7 +42,7 @@ defineExpose({ open });
       <label v-else>{{ t('Description') }}<input v-model="form.description" required maxlength="80" :placeholder="t('e.g. Groceries')"></label>
       <div class="form-row"><label>{{ t(form.type==='credit'?'Credit limit (¥)':'Amount (¥)') }}<input v-model="form.amount" type="number" :min="form.type==='credit'?0:0.01" max="999999999" step="0.01" required placeholder="0.00"></label><label>{{ t(form.type==='credit'?'Effective date':'Date') }}<input v-model="form.date" type="date" required></label></div>
       <label v-if="form.type!=='credit'">{{ t('Category') }}<select v-model="form.category"><option v-for="item in categories" :key="item" :value="item">{{ t(item) }}</option></select></label>
-      <label v-if="isLoan">{{ t('Borrower') }}<input v-model="form.borrower" required maxlength="80" :placeholder="t('e.g. Lender')"></label>
+      <label v-if="isLoan()">{{ t('Borrower') }}<input v-model="form.borrower" required maxlength="80" :placeholder="t('e.g. Lender')"></label>
       <label v-else>{{ t('Card') }}<select v-model="form.card" required><option v-for="card in cards" :key="card.id" :value="card.id">{{ t(card.name) }}<template v-if="card.last4"> · {{ t(card.network) }} •••• {{ card.last4 }}</template></option></select></label>
       <button class="primary submit" type="submit">{{ t(form.id?'Save changes':'Save transaction ↗') }}</button>
     </form>

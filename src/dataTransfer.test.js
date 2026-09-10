@@ -20,6 +20,17 @@ test('data backup round-trips transactions and cards',()=>{
   assert.match(backup,/"app": "FluxLedger"/);
 });
 
+test('backup round-trips cards without a last four while rejecting malformed non-empty values',()=>{
+  const noLastFour={id:'online-wallet',name:'Wallet',last4:'',noLast4:true,network:'Online banking',accountType:'Online banking',color:'#123456'};
+  const walletEntry={...entries[0],card:noLastFour.id};
+  const backup=createDataBackup([walletEntry],[noLastFour]);
+  const parsed=parseDataFile(backup,{cards:[]});
+  assert.deepEqual(parsed.cards,[noLastFour]);
+  assert.equal(parsed.entries[0].card,noLastFour.id);
+  assert.throws(()=>createDataBackup([], [{...noLastFour,last4:'123'}]),/Card data is invalid/);
+  assert.throws(()=>parseDataFile(JSON.stringify({transactions:[],cards:[{...noLastFour,last4:'12x4'}]})),/Card data is invalid/);
+});
+
 test('legacy CSV import maps localized fields to the current cards',()=>{
   const csv='\uFEFF交易说明,类型,分类,日期,银行卡,金额\r\nLunch,支出,餐饮,2026-09-10,日常消费卡 · 4329,18.50';
   const parsed=parseDataFile(csv,{cards});

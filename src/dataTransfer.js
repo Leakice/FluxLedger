@@ -64,11 +64,15 @@ function normalizeCards(value) {
     const last4 = String(card.last4 ?? '').trim();
     const network = String(card.network ?? '').trim();
     const color = String(card.color ?? '').trim();
-    if (!id || usedIds.has(id) || !name || !/^\d{4}$/.test(last4) || !network || !/^#[0-9a-f]{6}$/i.test(color)) {
+    if (!id || usedIds.has(id) || !name || (last4 !== '' && !/^\d{4}$/.test(last4)) || !network || !/^#[0-9a-f]{6}$/i.test(color)) {
       fail('Card data is invalid.');
     }
     usedIds.add(id);
-    return { id, name, last4, network, color };
+    const normalized = { id, name, last4, network, color };
+    if (typeof card.noLast4 === 'boolean') normalized.noLast4 = card.noLast4;
+    if (typeof card.accountType === 'string' && card.accountType.trim()) normalized.accountType = card.accountType.trim();
+    if (typeof card.loanBorrower === 'string' && card.loanBorrower.trim()) normalized.loanBorrower = card.loanBorrower.trim();
+    return normalized;
   });
 }
 
