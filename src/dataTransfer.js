@@ -123,7 +123,7 @@ function parseCsv(text, cards) {
     category: findColumn(headers, ['Category','分类']),
     date: findColumn(headers, ['Date','日期']),
     card: findColumn(headers, ['Card','银行卡']),
-    amount: findColumn(headers, ['Amount','Amount ($)','金额','金额（美元）'])
+    amount: findColumn(headers, ['Amount','Amount (¥)','Amount ($)','金额','金额（人民币）','金额（美元）'])
   };
   if (Object.values(columns).some(index => index < 0) || !rows.length) fail('No transaction data found.');
   const resolveCard = value => {

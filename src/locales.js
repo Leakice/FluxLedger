@@ -16,7 +16,7 @@
     'A clear view of your financial world.':'每一笔收支，都清清楚楚。','Local workspace':'本地工作区',
     'YOUR EVERYDAY MONEY':'记录日常的每一笔','Transaction history':'交易历史',
     '＋ Add transaction':'＋ 新增交易','Add transaction':'新增交易','Description':'交易说明','Category':'分类',
-    'Date':'日期','Card':'银行卡','Amount':'金额','Amount ($)':'金额（美元）','Type':'类型','Expense':'支出',
+    'Date':'日期','Card':'银行卡','Amount':'金额','Amount (¥)':'金额（人民币）','Type':'类型','Expense':'支出',
     'A small entry. A clearer picture.':'记下一笔，看清生活。','Save transaction ↗':'保存交易 ↗',
     'Search transactions…':'搜索交易…','e.g. Groceries':'例如：超市购物','No transactions found.':'暂无匹配的交易。',
     'No transactions':'暂无交易','No transactions for these filters.':'当前筛选条件下暂无交易。',
@@ -37,7 +37,7 @@
     'August salary':'八月工资','August living expenses':'八月生活支出'
   };
 
-Object.assign(dictionary, {"Credit limit":"信用额度","Set credit limit":"设置信用额度","Add expense":"记支出","Add income":"记收入","Edit transaction":"编辑记录","Edit":"编辑","Actions":"操作","Close":"关闭","Save changes":"保存修改","Transaction updated":"记录已更新","Edit card":"编辑银行卡","Add card":"添加银行卡","Save card":"保存银行卡","Card saved":"银行卡已保存","Card name":"银行卡名称","Last four digits":"卡号后四位","Card network":"卡组织","Card color":"卡片颜色","Everyday card":"日常消费卡","Lifestyle card":"生活储蓄卡","Filter card":"筛选银行卡","Credit limit ($)":"信用额度（美元）","Effective date":"生效日期","As of":"截至","The latest limit replaces the previous limit. It is not income.":"同一银行卡按最新生效记录设置额度，不重复累加，也不计入收入。","Card details can change. Linked transactions stay connected.":"修改卡片信息后，已有记录仍会关联这张银行卡。","Income + credit limit · capacity, not cash balance":"收入 + 信用额度 · 资金容量，非现金余额","Expenses above recorded funding":"支出超出已记录资金来源","Income and credit limit flow through cards to expenses":"收入与信用额度经银行卡流向支出","3. Allocation":"3. 资金分配","Unallocated capacity":"未分配资金容量","Select a card to see your money flow.":"选择银行卡以查看资金流向。"});
+Object.assign(dictionary, {"Credit limit":"信用额度","Set credit limit":"设置信用额度","Add expense":"记支出","Add income":"记收入","Edit transaction":"编辑记录","Edit":"编辑","Actions":"操作","Close":"关闭","Save changes":"保存修改","Transaction updated":"记录已更新","Edit card":"编辑银行卡","Add card":"添加银行卡","Save card":"保存银行卡","Card saved":"银行卡已保存","Card name":"银行卡名称","Last four digits":"卡号后四位","Card network":"卡组织","Card color":"卡片颜色","Everyday card":"日常消费卡","Lifestyle card":"生活储蓄卡","Filter card":"筛选银行卡","Credit limit (¥)":"信用额度（人民币）","Effective date":"生效日期","As of":"截至","The latest limit replaces the previous limit. It is not income.":"同一银行卡按最新生效记录设置额度，不重复累加，也不计入收入。","Card details can change. Linked transactions stay connected.":"修改卡片信息后，已有记录仍会关联这张银行卡。","Income + credit limit · capacity, not cash balance":"收入 + 信用额度 · 资金容量，非现金余额","Expenses above recorded funding":"支出超出已记录资金来源","Income and credit limit flow through cards to expenses":"收入与信用额度经银行卡流向支出","3. Allocation":"3. 资金分配","Unallocated capacity":"未分配资金容量","Select a card to see your money flow.":"选择银行卡以查看资金流向。"});
 
 Object.assign(dictionary, {"Swipe to explore the money flow":"左右滑动查看完整资金流","Money flow chart, scroll horizontally":"资金流图，可左右滚动","Delete":"删除"});
 
