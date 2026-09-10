@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDataBackup, parseDataFile } from './dataTransfer.js';
+import { withBuiltInAccountCards } from './ledger.js';
 
 const cards = [
   { id: '4329', name: 'Everyday card', last4: '4329', network: 'Visa', color: '#f4cf35' },
@@ -17,7 +18,49 @@ test('data backup round-trips transactions and cards',()=>{
   assert.equal(parsed.format,'json');
   assert.deepEqual(parsed.entries,entries);
   assert.deepEqual(parsed.cards,cards);
+  assert.deepEqual(parsed.hiddenBuiltInCardIds,[]);
   assert.match(backup,/"app": "FluxLedger"/);
+});
+
+test('backup preserves deleted built-ins before card normalization',()=>{
+  const visibleCards=withBuiltInAccountCards(cards,['credit-huabei']);
+  const backup=createDataBackup(entries,visibleCards,new Date('2026-09-10T08:00:00Z'),['credit-huabei']);
+  const parsed=parseDataFile(backup,{cards:[]});
+  const restored=withBuiltInAccountCards(parsed.cards,parsed.hiddenBuiltInCardIds);
+  assert.deepEqual(parsed.hiddenBuiltInCardIds,['credit-huabei']);
+  assert.ok(!restored.some(card=>card.id==='credit-huabei'));
+  assert.equal(restored.filter(card=>card.id==='credit-baitiao').length,1);
+});
+
+test('older backups without hidden built-in state remain compatible',()=>{
+  const parsed=parseDataFile(JSON.stringify({transactions:entries,cards}),{cards:[]});
+  assert.deepEqual(parsed.hiddenBuiltInCardIds,[]);
+});
+
+test('loan borrower and card identity survive a complete backup round trip',()=>{
+  const loanCard={id:'loan-alice',name:'Alice',last4:'',noLast4:true,network:'借款',accountType:'Credit card',loanBorrower:'Alice',color:'#627084'};
+  const loanEntry={id:3,description:'借款',borrower:' Alice ',amount:500,type:'credit',category:'Credit limit',card:loanCard.id,date:'2026-09-10'};
+  const parsed=parseDataFile(createDataBackup([loanEntry],[loanCard]),{cards:[]});
+  assert.equal(parsed.entries[0].borrower,'Alice');
+  assert.equal(parsed.entries[0].card,loanCard.id);
+  assert.deepEqual(parsed.cards,[loanCard]);
+});
+
+test('normalization only retains a non-empty string borrower when supplied',()=>{
+  const unrelated=[entries[0],{...entries[1],id:3,borrower:42},{...entries[1],id:4,borrower:'   '}];
+  const parsed=parseDataFile(createDataBackup(unrelated,cards),{cards:[]});
+  assert.ok(parsed.entries.every(entry=>!Object.hasOwn(entry,'borrower')));
+});
+
+test('backup round-trips cards without a last four while rejecting malformed non-empty values',()=>{
+  const noLastFour={id:'online-wallet',name:'Wallet',last4:'',noLast4:true,network:'Online banking',accountType:'Online banking',color:'#123456'};
+  const walletEntry={...entries[0],card:noLastFour.id};
+  const backup=createDataBackup([walletEntry],[noLastFour]);
+  const parsed=parseDataFile(backup,{cards:[]});
+  assert.deepEqual(parsed.cards,[noLastFour]);
+  assert.equal(parsed.entries[0].card,noLastFour.id);
+  assert.throws(()=>createDataBackup([], [{...noLastFour,last4:'123'}]),/Card data is invalid/);
+  assert.throws(()=>parseDataFile(JSON.stringify({transactions:[],cards:[{...noLastFour,last4:'12x4'}]})),/Card data is invalid/);
 });
 
 test('legacy CSV import maps localized fields to the current cards',()=>{

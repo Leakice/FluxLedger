@@ -50,7 +50,9 @@ function normalizeEntries(value) {
     let id = normalizeId(entry.id, fallback + index + 1);
     while (usedIds.has(String(id))) id = fallback + index + usedIds.size + 1;
     usedIds.add(String(id));
-    return { id, description, amount, type, category, date, card };
+    const normalized = { id, description, amount, type, category, date, card };
+    if (typeof entry.borrower === 'string' && entry.borrower.trim()) normalized.borrower = entry.borrower.trim();
+    return normalized;
   });
 }
 
@@ -64,11 +66,15 @@ function normalizeCards(value) {
     const last4 = String(card.last4 ?? '').trim();
     const network = String(card.network ?? '').trim();
     const color = String(card.color ?? '').trim();
-    if (!id || usedIds.has(id) || !name || !/^\d{4}$/.test(last4) || !network || !/^#[0-9a-f]{6}$/i.test(color)) {
+    if (!id || usedIds.has(id) || !name || (last4 !== '' && !/^\d{4}$/.test(last4)) || !network || !/^#[0-9a-f]{6}$/i.test(color)) {
       fail('Card data is invalid.');
     }
     usedIds.add(id);
-    return { id, name, last4, network, color };
+    const normalized = { id, name, last4, network, color };
+    if (typeof card.noLast4 === 'boolean') normalized.noLast4 = card.noLast4;
+    if (typeof card.accountType === 'string' && card.accountType.trim()) normalized.accountType = card.accountType.trim();
+    if (typeof card.loanBorrower === 'string' && card.loanBorrower.trim()) normalized.loanBorrower = card.loanBorrower.trim();
+    return normalized;
   });
 }
 
@@ -148,7 +154,13 @@ function parseCsv(text, cards) {
   return { format: 'csv', entries: normalizeEntries(entries), cards: normalizeCards(cards) };
 }
 
-export function createDataBackup(entries, cards, exportedAt = new Date()) {
+function normalizeHiddenBuiltInCardIds(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) fail('Hidden card data is invalid.');
+  return [...new Set(value.map(id => String(id ?? '').trim()).filter(Boolean))];
+}
+
+export function createDataBackup(entries, cards, exportedAt = new Date(), hiddenBuiltInCardIds = []) {
   const normalizedCards = normalizeCards(cards);
   const normalizedEntries = normalizeEntries(entries);
   validateCardReferences(normalizedEntries, normalizedCards);
@@ -157,7 +169,8 @@ export function createDataBackup(entries, cards, exportedAt = new Date()) {
     version: 1,
     exportedAt: exportedAt.toISOString(),
     transactions: normalizedEntries,
-    cards: normalizedCards
+    cards: normalizedCards,
+    hiddenBuiltInCardIds: normalizeHiddenBuiltInCardIds(hiddenBuiltInCardIds)
   }, null, 2);
 }
 
@@ -177,7 +190,8 @@ export function parseDataFile(text, options = {}) {
     const entries = normalizeEntries(rawEntries);
     const cards = normalizeCards(rawCards);
     validateCardReferences(entries, cards);
-    return { format: 'json', entries, cards };
+    const hiddenBuiltInCardIds = normalizeHiddenBuiltInCardIds(Array.isArray(payload) ? undefined : payload.hiddenBuiltInCardIds);
+    return { format: 'json', entries, cards, hiddenBuiltInCardIds };
   }
   return parseCsv(content, currentCards);
 }

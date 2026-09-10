@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { creditLimit, periodEnd, buildFlowModel } from './ledger.js';
+import { creditLimit, periodEnd, buildFlowModel, creditAccountCards, onlineBalanceCards, withBuiltInAccountCards, resolveCreditAccountCard, findLoanCard } from './ledger.js';
 import { flowChart } from './charts.js';
 const cards=[{id:'a',name:'Daily',last4:'1234',color:'#888'},{id:'b',name:'Travel',last4:'5678',color:'#555'}];
 const entries=[
@@ -17,6 +17,49 @@ test('credit limit uses latest effective snapshot, not the sum; future limits ex
  assert.equal(creditLimit(entries,'b','2026-09-30'),0);
  assert.equal(creditLimit([...entries,{id:7,type:'credit',card:'a',amount:0,date:'2026-09-03'}],'a','2026-09-30'),0);
 });
+test('every built-in credit and online-balance account has one no-last-four card',()=>{
+ const expected=[...creditAccountCards,...onlineBalanceCards];
+ const cards=withBuiltInAccountCards([]);
+ assert.equal(cards.length,expected.length);
+ assert.ok(cards.filter(card=>expected.some(expectedCard=>expectedCard.id===card.id)).every(card=>card.last4===''));
+ assert.deepEqual(cards.map(card=>card.name).sort(),expected.map(card=>card.name).sort());
+ assert.ok(!withBuiltInAccountCards([],['online-wechat']).some(card=>card.id==='online-wechat'));
+});
+
+test('built-in migration preserves a name-matched card ID and does not add a duplicate',()=>{
+ const persisted={id:'legacy-user-id',name:'白条',last4:'1234',network:'Visa',color:'#123456'};
+ const migrated=withBuiltInAccountCards([persisted]);
+ const matches=migrated.filter(card=>card.name==='白条');
+ assert.equal(matches.length,1);
+ assert.equal(matches[0].id,'legacy-user-id');
+ assert.ok(!migrated.some(card=>card.id==='credit-baitiao'));
+ const model=buildFlowModel([{...entries[0],card:'legacy-user-id'}],[],migrated,'2026-09-30');
+ assert.equal(model.cards.find(card=>card.id==='legacy-user-id').income,100);
+});
+
+test('credit account selection resolves a migrated legacy ID from runtime cards',()=>{
+ const legacy={id:'legacy-baitiao-id',name:'白条',last4:'',noLast4:true,network:'Other',accountType:'Credit card',color:'#123456'};
+ const migrated=withBuiltInAccountCards([legacy]);
+ assert.equal(resolveCreditAccountCard(migrated,'白条'),migrated.find(card=>card.id===legacy.id));
+ assert.equal(resolveCreditAccountCard(migrated,'白条').id,'legacy-baitiao-id');
+ assert.ok(!migrated.some(card=>card.id==='credit-baitiao'));
+});
+
+test('loan identity prefers the restored entry card and never needs a duplicate',()=>{
+ const loan={id:'loan-legacy',name:'Alice',last4:'',network:'借款',color:'#627084',loanBorrower:'Alice'};
+ assert.equal(findLoanCard([loan],' Alice ','loan-legacy'),loan);
+ assert.equal(findLoanCard([loan],'Alice','missing'),loan);
+});
+
+test('built-in migration fills missing defaults without overwriting persisted edits',()=>{
+ const persisted={id:'credit-baitiao',name:'My credit account',last4:'2468',network:'Visa',color:'#123456'};
+ const normalized=withBuiltInAccountCards([persisted]);
+ const card=normalized.find(item=>item.id==='credit-baitiao');
+ assert.equal(normalized.filter(item=>item.id==='credit-baitiao').length,1);
+ assert.deepEqual(card,{...creditAccountCards[0],...persisted});
+ assert.equal(withBuiltInAccountCards([card]).find(item=>item.id===card.id).name,'My credit account');
+});
+
 test('funding contains income and credit only; editing expenses never changes capacity',()=>{
  const model=buildFlowModel(entries.filter(e=>e.date.startsWith('2026-09')),entries,cards,'2026-09-30');
  assert.equal(model.income,125);assert.equal(model.credit,80);assert.equal(model.capacity,205);
@@ -47,4 +90,31 @@ test('SVG escapes card names and never fabricates another income source',()=>{
  assert.ok(!/NaN|Infinity/.test(svg));
  const empty=flowChart(buildFlowModel([],[],cards,'2026-09-30'),'Sankey diagram',s=>s);
  assert.ok(!/NaN|Infinity/.test(empty));
+});
+
+test('narrow Sankey keeps all three columns and wrapped labels inside colored nodes',()=>{
+ const model=buildFlowModel(entries,entries,[{...cards[0],name:'银行卡很长的名称 <script> & extra description',last4:'9999'}],'2026-09-30');
+ for(const width of [280,343,600,900]){
+  const svg=flowChart(model,'Sankey diagram',s=>s,width);
+  assert.ok(svg.includes(`viewBox="0 0 ${width} `));
+  assert.ok(!svg.includes('label-box'));
+  assert.ok(!svg.includes('<script>'));
+  assert.ok(svg.includes('9999'));
+  assert.ok(!/NaN|Infinity/.test(svg));
+  const groups=[...svg.matchAll(/<g class="flow-node">(.*?)<\/g>/g)].map(m=>m[1]);
+  const columns=new Set();
+  for(const group of groups){
+   const rect=group.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/);
+   const [x,y,w,h]=rect.slice(1).map(Number);
+   columns.add(x);
+   assert.ok(x>=0 && x+w<=width);
+   for(const span of group.matchAll(/<tspan x="([\d.]+)" y="([\d.]+)"/g)){
+    assert.equal(Number(span[1]),x+w/2);
+    assert.ok(Number(span[2])>y && Number(span[2])<y+h);
+   }
+  }
+  assert.equal(columns.size,3);
+  const positions=[...columns].sort((a,b)=>a-b);
+  assert.ok(Math.abs(positions[1]+Math.min(150,width*.27)/2-width/2)<.01);
+ }
 });
