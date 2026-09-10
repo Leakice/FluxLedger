@@ -19,11 +19,31 @@ test('credit limit uses latest effective snapshot, not the sum; future limits ex
 });
 test('every built-in credit and online-balance account has one no-last-four card',()=>{
  const expected=[...creditAccountCards,...onlineBalanceCards];
- const cards=withBuiltInAccountCards([{id:'credit-baitiao',name:'白条',last4:'9999',network:'Other',color:'#000'}]);
+ const cards=withBuiltInAccountCards([]);
  assert.equal(cards.length,expected.length);
  assert.ok(cards.filter(card=>expected.some(expectedCard=>expectedCard.id===card.id)).every(card=>card.last4===''));
  assert.deepEqual(cards.map(card=>card.name).sort(),expected.map(card=>card.name).sort());
  assert.ok(!withBuiltInAccountCards([],['online-wechat']).some(card=>card.id==='online-wechat'));
+});
+
+test('built-in migration preserves a name-matched card ID and does not add a duplicate',()=>{
+ const persisted={id:'legacy-user-id',name:'白条',last4:'1234',network:'Visa',color:'#123456'};
+ const migrated=withBuiltInAccountCards([persisted]);
+ const matches=migrated.filter(card=>card.name==='白条');
+ assert.equal(matches.length,1);
+ assert.equal(matches[0].id,'legacy-user-id');
+ assert.ok(!migrated.some(card=>card.id==='credit-baitiao'));
+ const model=buildFlowModel([{...entries[0],card:'legacy-user-id'}],[],migrated,'2026-09-30');
+ assert.equal(model.cards.find(card=>card.id==='legacy-user-id').income,100);
+});
+
+test('built-in migration fills missing defaults without overwriting persisted edits',()=>{
+ const persisted={id:'credit-baitiao',name:'My credit account',last4:'2468',network:'Visa',color:'#123456'};
+ const normalized=withBuiltInAccountCards([persisted]);
+ const card=normalized.find(item=>item.id==='credit-baitiao');
+ assert.equal(normalized.filter(item=>item.id==='credit-baitiao').length,1);
+ assert.deepEqual(card,{...creditAccountCards[0],...persisted});
+ assert.equal(withBuiltInAccountCards([card]).find(item=>item.id===card.id).name,'My credit account');
 });
 
 test('funding contains income and credit only; editing expenses never changes capacity',()=>{
