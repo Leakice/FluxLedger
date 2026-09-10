@@ -1,16 +1,61 @@
-const money=n=>'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-const escapeHtml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function ribbon(x1,y1,h1,x2,y2,h2,color,opacity=.4){const c=(x2-x1)*.48;return `<path d="M${x1},${y1} C${x1+c},${y1} ${x2-c},${y2} ${x2},${y2} L${x2},${y2+h2} C${x2-c},${y2+h2} ${x1+c},${y1+h1} ${x1},${y1+h1}Z" fill="${color}" opacity="${opacity}"/>`;}
-function box(x,y,label,value,width=113){return `<rect class="label-box" x="${x}" y="${y}" width="${width}" height="48" rx="8" fill="white" fill-opacity=".94"/><text x="${x+10}" y="${y+17}" font-size="10" fill="#999da2">${escapeHtml(label)}</text><text class="chart-main" x="${x+10}" y="${y+36}" font-size="12" fill="#262b30">${money(value)}</text>`;}
-function node(x,y,w,h,color,percentage){return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="${color}" stroke="white" stroke-width="2.5"/><rect x="${x+3}" y="${y+4}" width="${w-6}" height="${Math.min(31,h-8)}" rx="5" fill="white" opacity=".17"/>${h>28?`<text x="${x+w/2}" y="${y+24}" text-anchor="middle" fill="white" font-size="12">${percentage}%</text>`:''}`;}
-function rawFlowChart(data, chartType){
- const expenses=data.filter(e=>e.type==='expense'),incomes=data.filter(e=>e.type==='income');const total=expenses.reduce((s,e)=>s+e.amount,0),inc=incomes.reduce((s,e)=>s+e.amount,0);
- const groups=['Food & Drinks','Entertainment','Utilities','Shopping','Subscription','Other'].map(c=>({name:c,amount:expenses.filter(e=>e.category===c).reduce((s,e)=>s+e.amount,0)}));
- if(!total&&!inc){return '<div style="height:100%;display:grid;place-items:center;color:var(--muted)">No transactions for these filters.</div>';return;}
- if(chartType==='Category breakdown'){return `<svg viewBox="0 0 860 335">${groups.map((g,i)=>`<text x="5" y="${38+i*51}" font-size="12" fill="#879099">${g.name}</text><rect x="150" y="${19+i*51}" width="${total?g.amount/total*540:0}" height="28" rx="8" fill="${['#8054ff','#3384ff','#28b8d8','#75cae1','#9cd8e5','#bddfe8'][i]}"/><text class="chart-main" x="${160+(total?g.amount/total*540:0)}" y="${38+i*51}" font-size="12">${money(g.amount)}</text>`).join('')}</svg>`;return;}
- const cardTotals=['4329','8851'].map(c=>expenses.filter(e=>e.card===c).reduce((s,e)=>s+e.amount,0));const denom=total||1;let y=36;const slots=groups.map(g=>{let h=total?g.amount/total*230:0;const slot={...g,y,h};if(h)y+=h+7;return slot;});
- let paths=ribbon(54,36,190,395,36,122,'url(#purple)',.28)+ribbon(54,36,68,395,175,64,'url(#purple)',.67)+ribbon(54,255,62,395,238,62,'#7d8daa',.44);
- let offsets=[36,175];slots.forEach(g=>{if(!g.h)return;const byCard=['4329','8851'].map(c=>expenses.filter(e=>e.category===g.name&&e.card===c).reduce((s,e)=>s+e.amount,0));let dest=g.y;byCard.forEach((v,i)=>{if(!v)return;const end=g.h*v/g.amount;const startH=v/(cardTotals[i]||1)*122;paths+=ribbon(437,offsets[i],startH,697,dest,end,i?'url(#blue)':'url(#cyan)',i?.65:.38);offsets[i]+=startH;dest+=end;});});
- return `<svg viewBox="0 0 860 335" role="img" aria-label="Money flow from income through cards to expense categories"><defs><linearGradient id="purple"><stop stop-color="#8852ff"/><stop offset="1" stop-color="#6595f8"/></linearGradient><linearGradient id="cyan"><stop stop-color="#5998ff"/><stop offset="1" stop-color="#8ddfec"/></linearGradient><linearGradient id="blue"><stop stop-color="#187aff"/><stop offset="1" stop-color="#39c3e2"/></linearGradient><pattern id="stripes" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(55)"><rect width="2" height="8" fill="#087fc8" opacity=".22"/></pattern></defs><g font-family="Arial, sans-serif"><g fill="#92999c" font-size="11"><text x="13" y="18">1. Source</text><text x="396" y="18">2. Cards</text><text x="699" y="18">3. Expenses</text></g><path d="M4 27V324M853 27V324" stroke="#dfe6e8" stroke-dasharray="5 6"/>${paths}${node(13,36,41,190,'#8050f6',inc?Math.round((incomes[0]?.amount||0)/inc*100):0)}${node(13,255,41,62,'#12161b',inc?100-Math.round((incomes[0]?.amount||0)/inc*100):0)}${node(395,36,42,122,'#3688ff',Math.round(cardTotals[0]/denom*100))}<rect x="397" y="38" width="38" height="118" rx="7" fill="url(#stripes)"/>${node(395,175,42,125,'#1776f6',Math.round(cardTotals[1]/denom*100))}${box(61,40,'Own money',incomes[0]?.amount||0)}${box(61,258,'Other income',incomes.slice(1).reduce((s,e)=>s+e.amount,0))}${box(444,180,'Card • 8851',cardTotals[1],110)}${slots.filter(g=>g.h).map(g=>`${node(697,g.y,41,g.h,'#27b9d8',Math.round(g.amount/denom*100))}<rect x="699" y="${g.y+2}" width="37" height="${Math.max(0,g.h-4)}" rx="6" fill="url(#stripes)"/>${g.h>28?box(744,g.y+1,g.name,g.amount,109):`<title>${g.name}: ${money(g.amount)}</title>`}`).join('')}</g></svg>`;
+const money = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function ribbon(x1,y1,h1,x2,y2,h2,color) {
+  const curve=(x2-x1)*.48;
+  return '<path class="flow-ribbon" d="M'+x1+','+y1+' C'+(x1+curve)+','+y1+' '+(x2-curve)+','+y2+' '+x2+','+y2+' L'+x2+','+(y2+h2)+' C'+(x2-curve)+','+(y2+h2)+' '+(x1+curve)+','+(y1+h1)+' '+x1+','+(y1+h1)+'Z" fill="'+color+'"/>';
 }
-export function flowChart(data,chartType,t){return rawFlowChart(data,chartType).replace(/>([^<>]+)</g,(match,value)=>'>'+escapeHtml(t(value.replaceAll('&amp;','&')))+'<');}
+function label(x,y,name,value) {
+  return '<g class="flow-label"><rect class="label-box" x="'+x+'" y="'+y+'" width="125" height="37" rx="7" fill="var(--panel)" fill-opacity=".94"/><text x="'+(x+8)+'" y="'+(y+13)+'" font-size="10" fill="var(--muted)">'+escapeHtml(name)+'</text><text x="'+(x+8)+'" y="'+(y+29)+'" font-size="12" fill="var(--ink)">'+money(value)+'</text></g>';
+}
+function block(x,y,h,color,value,total) {
+  return '<rect x="'+x+'" y="'+y+'" width="38" height="'+Math.max(h,3)+'" rx="7" fill="'+color+'" stroke="var(--panel)" stroke-width="2"/>'+(h>26?'<text x="'+(x+19)+'" y="'+(y+20)+'" text-anchor="middle" fill="white" font-size="11">'+(total?Math.round(value/total*100):0)+'%</text>':'');
+}
+function slots(values,height) {
+  const total=values.reduce((s,v)=>s+v,0), available=height-64-values.length*9;
+  const base=Math.min(35,available/Math.max(values.length,1));
+  const remainder=Math.max(0,available-base*values.length);
+  let y=38;
+  return values.map(value=>{const h=base+(total?value/total*remainder:0);const result={y,h};y+=h+9;return result;});
+}
+export function flowChart(model,chartType,t) {
+  const {cards,income,credit,capacity}=model;
+  if(!cards.length)return '<div class="chart-empty">'+escapeHtml(t('Select a card to see your money flow.'))+'</div>';
+  const categories=[...new Set(cards.flatMap(c=>c.expenses.map(e=>e.category)))];
+  const totals=categories.map(name=>({name,value:cards.reduce((s,c)=>s+c.expenses.filter(e=>e.category===name).reduce((a,e)=>a+e.amount,0),0)}));
+  if(chartType==='Category breakdown') {
+    const max=Math.max(...totals.map(g=>g.value),1);
+    if(!totals.length)return '<div class="chart-empty">'+escapeHtml(t('No transactions for these filters.'))+'</div>';
+    return '<svg viewBox="0 0 960 '+Math.max(335,totals.length*48)+'">'+totals.map((g,i)=>'<text x="10" y="'+(32+i*47)+'" font-size="12" fill="var(--muted)">'+escapeHtml(t(g.name))+'</text><rect x="160" y="'+(12+i*47)+'" width="'+(g.value/max*630)+'" height="29" rx="8" fill="#498cff"/><text x="'+(174+g.value/max*630)+'" y="'+(32+i*47)+'" font-size="12" fill="var(--ink)">'+money(g.value)+'</text>').join('')+'</svg>';
+  }
+  const unused=cards.reduce((s,c)=>s+Math.max(0,c.capacity-c.spent),0);
+  const targets=[...totals,...(unused?[{name:'Unallocated capacity',value:unused}]:[])];
+  const height=Math.max(350,cards.length*65+60,targets.length*45+60);
+  const ss=slots([income,credit],height), cs=slots(cards.map(c=>c.capacity),height), ts=slots(targets.map(g=>g.value),height);
+  const sourceUsed=[0,0], cardUsed=cards.map(()=>0), targetUsed=targets.map(()=>0);
+  let paths='';
+  cards.forEach((card,i)=>{
+    [card.income,card.credit].forEach((value,j)=>{
+      if(!value)return;
+      const sh=ss[j].h*value/([income,credit][j]||1);
+      const ch=cs[i].h*value/(card.capacity||1);
+      paths+=ribbon(52,ss[j].y+sourceUsed[j],sh,400,cs[i].y+cardUsed[i],ch,j?'url(#credit-flow)':'url(#income-flow)');
+      sourceUsed[j]+=sh;cardUsed[i]+=ch;
+    });
+  });
+  cards.forEach((card,i)=>{
+    let used=0;
+    targets.forEach((target,j)=>{
+      const amount=target.name==='Unallocated capacity'?Math.max(0,card.capacity-card.spent):card.expenses.filter(e=>e.category===target.name).reduce((s,e)=>s+e.amount,0);
+      const funded=target.name==='Unallocated capacity'?amount:amount*Math.min(1,card.capacity/(card.spent||1));
+      if(!funded)return;
+      const ch=cs[i].h*funded/(card.capacity||1);
+      const th=ts[j].h*funded/(target.value||1);
+      paths+=ribbon(438,cs[i].y+used,ch,777,ts[j].y+targetUsed[j],th,'url(#expense-flow)');
+      used+=ch;targetUsed[j]+=th;
+    });
+  });
+  return '<svg viewBox="0 0 960 '+height+'" role="img" aria-label="'+escapeHtml(t('Income and credit limit flow through cards to expenses'))+'"><defs><linearGradient id="income-flow"><stop stop-color="#8a5cf6" stop-opacity=".55"/><stop offset="1" stop-color="#5997fa" stop-opacity=".26"/></linearGradient><linearGradient id="credit-flow"><stop stop-color="#627084" stop-opacity=".45"/><stop offset="1" stop-color="#5189d6" stop-opacity=".3"/></linearGradient><linearGradient id="expense-flow"><stop stop-color="#2483ff" stop-opacity=".48"/><stop offset="1" stop-color="#39c4d9" stop-opacity=".28"/></linearGradient></defs><g font-family="Arial,Microsoft YaHei,sans-serif"><g font-size="11" fill="var(--muted)"><text x="14" y="18">'+escapeHtml(t('1. Source'))+'</text><text x="400" y="18">'+escapeHtml(t('2. Cards'))+'</text><text x="777" y="18">'+escapeHtml(t('3. Allocation'))+'</text></g>'+paths+
+    [income,credit].map((v,i)=>block(14,ss[i].y,ss[i].h,i?'#343e4f':'#8855f5',v,capacity)+label(59,ss[i].y+3,t(i?'Credit limit':'Income'),v)).join('')+
+    cards.map((c,i)=>'<g><title>'+escapeHtml(t(c.name)+' • '+c.last4+': '+money(c.capacity))+'</title>'+block(400,cs[i].y,cs[i].h,c.color,c.capacity,capacity)+label(445,cs[i].y+3,t(c.name).slice(0,16)+' • '+c.last4,c.capacity)+'</g>').join('')+
+    targets.map((g,i)=>'<g><title>'+escapeHtml(t(g.name)+': '+money(g.value))+'</title>'+block(777,ts[i].y,ts[i].h,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',g.value,Math.max(capacity,model.spent))+label(821,ts[i].y+2,t(g.name),g.value)+'</g>').join('')+'</g></svg>';
+}

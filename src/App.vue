@@ -1,32 +1,40 @@
 <script setup>
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
 import { flowChart } from './charts';
+import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel } from './ledger';
+import EntryDialog from './components/EntryDialog.vue';
+import CardDialog from './components/CardDialog.vue';
 
 const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}};
 const entries=ref(read('cascade-transactions-v1',seed));
+const bankCards=ref(read('fluxledger-cards-v1',defaultCards));
+const entryDialog=ref(null), cardDialog=ref(null), recordKind=ref('expense');
 const language=ref(localStorage.getItem('cascade-language')||'en');
 const dark=ref(localStorage.getItem('cascade-theme')==='dark');
 const page=ref('Analytics'), report=ref('Overview'), period=ref('month'), month=ref('2026-09');
-const cards=ref(['4329','8851']), category=ref('All categories'), expanded=ref(false), chartType=ref('Sankey diagram'), search=ref('');
-const dialog=ref(null), notification=ref(''), deleted=ref(null);
-const categoryOptions=['Food & Drinks','Entertainment','Utilities','Shopping','Subscription','Other','Salary'];
+const cards=ref(bankCards.value.map(c=>c.id)), category=ref('All categories'), expanded=ref(false), chartType=ref('Sankey diagram'), search=ref('');
+const notification=ref(''), deleted=ref(null);
+const asOf=computed(()=>periodEnd(month.value,period.value));
+const cardName=id=>{const card=bankCards.value.find(c=>c.id===id);return card?t(card.name)+' · '+card.last4:id};
+const limitFor=id=>creditLimit(entries.value,id,asOf.value);
+const totalCredit=computed(()=>bankCards.value.filter(c=>cards.value.includes(c.id)).reduce((s,c)=>s+limitFor(c.id),0));
 const filterCategories=['All categories','Food & Drinks','Subscription','Income','Shopping','Entertainment','Utilities','Other'];
-const form=reactive({description:'',amount:'',type:'expense',category:'Food & Drinks',date:'2026-09-10',card:'4329'});
 const t=s=>language.value==='zh'?(dictionary[s]||s):s;
 const money=n=>'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const signed=n=>(n>=0?'+ ':'− ')+money(n);
 const dateLabel=(value,short=false)=>new Date(value+'-01T12:00:00').toLocaleDateString(language.value==='zh'?'zh-CN':'en-US',short?{month:'short'}:{month:'long',year:'numeric'});
 const matchesCategory=e=>category.value==='All categories'||(category.value==='Income'?e.type==='income':category.value===e.category);
-const filtered=computed(()=>entries.value.filter(e=>e.date.startsWith(period.value==='year'?month.value.slice(0,4):month.value)&&cards.value.includes(e.card)&&matchesCategory(e)));
+const periodEntries=computed(()=>entries.value.filter(e=>e.date.startsWith(period.value==='year'?month.value.slice(0,4):month.value)&&cards.value.includes(e.card)));
+const filtered=computed(()=>periodEntries.value.filter(e=>e.type!=='credit'&&matchesCategory(e)));
 const income=computed(()=>filtered.value.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0));
 const expenses=computed(()=>filtered.value.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0));
 const net=computed(()=>income.value-expenses.value);
 const revenue=computed(()=>report.value==='Income'?income.value:report.value==='Expenses'?expenses.value:net.value);
 const revenueLabel=computed(()=>report.value==='Income'?'Total Income':report.value==='Expenses'?'Total Expenses':period.value==='year'?'Net Yearly Revenue':'Net Monthly Revenue');
 const previousMonth=computed(()=>{const d=new Date(month.value+'-01T12:00:00');d.setMonth(d.getMonth()-1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')});
-const previousRows=computed(()=>entries.value.filter(e=>e.date.startsWith(period.value==='year'?String(Number(month.value.slice(0,4))-1):previousMonth.value)&&cards.value.includes(e.card)&&matchesCategory(e)));
+const previousRows=computed(()=>entries.value.filter(e=>e.type!=='credit'&&e.date.startsWith(period.value==='year'?String(Number(month.value.slice(0,4))-1):previousMonth.value)&&cards.value.includes(e.card)&&matchesCategory(e)));
 const previousIncome=computed(()=>previousRows.value.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0));
 const previousExpenses=computed(()=>previousRows.value.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0));
 const growth=computed(()=>{const prev=previousIncome.value-previousExpenses.value;return prev?`${net.value>=prev?'↗':'↘'} ${Math.abs(Math.round((net.value-prev)/Math.abs(prev)*100))}%`:'—'});
@@ -35,21 +43,24 @@ const previousLabel=computed(()=>period.value==='year'?String(Number(month.value
 const sources=computed(()=>{const totals={};filtered.value.filter(e=>e.type===(report.value==='Income'?'income':'expense')).forEach(e=>totals[e.category]=(totals[e.category]||0)+e.amount);return Object.entries(totals).sort((a,b)=>b[1]-a[1])});
 const percent=i=>{const total=sources.value.reduce((s,e)=>s+e[1],0);return total?Math.round((sources.value[i]?.[1]||0)/total*100):0};
 const donutStyle=computed(()=>({background:`conic-gradient(#ff852b 0 ${percent(0)}%,var(--panel) ${percent(0)}% ${Math.min(100,percent(0)+1)}%,#e6e9ea ${Math.min(100,percent(0)+1)}% 100%)`}));
-const flow=computed(()=>flowChart(filtered.value,chartType.value,t));
-const rows=computed(()=>(page.value==='History'?entries.value:filtered.value).filter(e=>(e.description+' '+t(e.category)+' '+e.category).toLowerCase().includes(search.value.toLowerCase())).slice().sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id));
-const months=computed(()=>Array.from({length:6},(_,i)=>{const d=new Date(month.value+'-01T12:00:00');d.setMonth(d.getMonth()-5+i);const prefix=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const data=entries.value.filter(e=>e.date.startsWith(prefix)&&cards.value.includes(e.card)&&matchesCategory(e));return{label:dateLabel(prefix,true),income:data.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0),expense:data.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0),count:data.length}}));
+const flowModel=computed(()=>buildFlowModel(periodEntries.value,entries.value,bankCards.value.filter(c=>cards.value.includes(c.id)),asOf.value,category.value));
+const flow=computed(()=>flowChart(flowModel.value,chartType.value,t));
+const rows=computed(()=>(page.value==='History'?entries.value:recordKind.value==='credit'?entries.value.filter(e=>e.type==='credit'&&cards.value.includes(e.card)&&e.date<=asOf.value):periodEntries.value.filter(e=>e.type===recordKind.value&&matchesCategory(e))).filter(e=>(e.description+' '+t(e.category)+' '+e.category+' '+cardName(e.card)).toLowerCase().includes(search.value.toLowerCase())).slice().sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id));
+const months=computed(()=>Array.from({length:6},(_,i)=>{const d=new Date(month.value+'-01T12:00:00');d.setMonth(d.getMonth()-5+i);const prefix=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const data=entries.value.filter(e=>e.type!=='credit'&&e.date.startsWith(prefix)&&cards.value.includes(e.card)&&matchesCategory(e));return{label:dateLabel(prefix,true),income:data.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0),expense:data.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0),count:data.length}}));
 const chartMax=computed(()=>Math.max(...months.value.map(e=>Math.max(e.income,e.expense)),1000)*1.12);
 const linePoints=computed(()=>months.value.map((e,i)=>`${65+i*64},${176-e.expense/chartMax.value*145}`).join(' '));
 const frequencyPoints=computed(()=>{const max=Math.max(...months.value.map(e=>e.count),1);return months.value.map((e,i)=>`${i*72},${72-e.count/max*48}`).join(' ')});
 let toastTimer;
 function toast(message){notification.value=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>notification.value='',4000)}
 function navigate(next){page.value=next;if(next==='Dashboard')report.value='Overview'}
-function reset(){period.value='month';month.value='2026-09';cards.value=['4329','8851'];category.value='All categories';toast('Filters reset')}
-function openForm(){form.date=month.value+'-10';dialog.value.showModal()}
-function add(){const amount=Number(form.amount);if(!Number.isFinite(amount)||amount<=0||!form.description.trim())return;entries.value.push({...form,description:form.description.trim(),amount,id:Date.now()});month.value=form.date.slice(0,7);form.description='';form.amount='';dialog.value.close();toast('Transaction saved on this device')}
+function reset(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';toast('Filters reset')}
+function openForm(type='expense',entry=null){entryDialog.value.open(type,month.value+'-10',entry)}
+function saveEntry(entry){const existing=entries.value.findIndex(e=>e.id===entry.id);if(existing>=0)entries.value[existing]=entry;else entries.value.push({...entry,id:Date.now()});month.value=entry.date.slice(0,7);recordKind.value=entry.type;toast(existing>=0?'Transaction updated':'Transaction saved on this device')}
+function saveCard(card){if(card.id){const index=bankCards.value.findIndex(c=>c.id===card.id);bankCards.value[index]=card;}else{card.id='card-'+Date.now();bankCards.value.push(card);cards.value.push(card.id)}toast('Card saved')}
 function remove(entry){deleted.value=entry;entries.value=entries.value.filter(e=>e.id!==entry.id);toast('Transaction deleted')}
 function undo(){if(deleted.value){entries.value.push(deleted.value);deleted.value=null;notification.value=''}}
-function exportCsv(){const cell=v=>'"'+String(v).replace(/^([=+@-])/,"'$1").replaceAll('"','""')+'"';const csv='\uFEFF'+[['Description','Type','Category','Date','Card','Amount'].map(t),...filtered.value.map(e=>[e.description,t(e.type==='income'?'Income':'Expense'),t(e.category),e.date,e.card,e.amount])].map(r=>r.map(cell).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`cascade-${month.value}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Transactions exported')}
+function exportCsv(){const cell=v=>'"'+String(v).replace(/^([=+@-])/,"'$1").replaceAll('"','""')+'"';const csv='\uFEFF'+[['Description','Type','Category','Date','Card','Amount'].map(t),...(page.value==='Transactions'||page.value==='History'?rows.value:filtered.value).map(e=>[e.description,t(entryKinds.find(k=>k.type===e.type)?.label||'Expense'),t(e.category),e.date,cardName(e.card),e.amount])].map(r=>r.map(cell).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`cascade-${month.value}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Transactions exported')}
+watch(bankCards,value=>localStorage.setItem('fluxledger-cards-v1',JSON.stringify(value)),{deep:true});
 watch(entries,value=>localStorage.setItem('cascade-transactions-v1',JSON.stringify(value)),{deep:true});
 watch(language,value=>{localStorage.setItem('cascade-language',value);document.documentElement.lang=value==='zh'?'zh-CN':'en';document.title=value==='zh'?'Cascade — 本地记账':'Cascade — Money in motion'},{immediate:true});
 watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.setItem('cascade-theme',value?'dark':'light')},{immediate:true});
@@ -69,13 +80,13 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
   <main>
     <section v-if="page==='Analytics'||page==='Dashboard'">
       <div class="workspace"><div class="flow-panel">
-        <div class="section-heading"><div class="title-group"><h1>{{ t('Money Flow') }}</h1><select v-model="chartType" :aria-label="t('Chart type')"><option v-for="item in ['Sankey diagram','Category breakdown']" :key="item" :value="item">{{ t(item) }}</option></select></div><div class="tools"><button class="icon" :title="t('Export transactions')" @click="exportCsv"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H5V3h2m7 0v5h5M12 17V10m-3 3 3-3 3 3"/></svg></button><button class="icon" :title="t('Add transaction')" @click="openForm">＋</button></div></div>
+        <div class="section-heading"><div class="title-group"><h1>{{ t('Money Flow') }}</h1><select v-model="chartType" :aria-label="t('Chart type')"><option v-for="item in ['Sankey diagram','Category breakdown']" :key="item" :value="item">{{ t(item) }}</option></select></div><div class="tools"><button class="icon" :title="t('Export transactions')" @click="exportCsv"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H5V3h2m7 0v5h5M12 17V10m-3 3 3-3 3 3"/></svg></button><button v-for="kind in entryKinds" :key="kind.type" class="quick-entry" :class="kind.type" :title="t(kind.action)" @click="openForm(kind.type)"><span>{{ kind.icon }}</span>{{ t(kind.label) }}</button></div></div>
         <div id="flow-chart" v-html="flow"/>
-        <div class="flow-footer"><span><i class="live-dot"/>{{ t('Your money, at a glance') }}</span><span>{{ periodLabel }} ↗</span></div>
+        <div class="flow-footer"><span><i class="live-dot"/>{{ t('Income + credit limit · capacity, not cash balance') }}</span><span>{{ periodLabel }} ↗</span></div><p v-if="flowModel.gap>0" class="funding-note">{{ t('Expenses above recorded funding') }}: {{ money(flowModel.gap) }}</p>
       </div>
       <aside><div class="aside-title"><h2>{{ t('Filters') }}</h2><button class="icon" :title="t('Reset filters')" @click="reset">↺</button></div>
         <label class="filter-label">{{ t('Time period') }}</label><div class="pills" id="period"><button :class="{active:period==='month'}" @click="period='month'">{{ t('Month') }}</button><button :class="{active:period==='year'}" @click="period='year'">{{ t('Year') }}</button><input id="month" type="month" :value="month" :aria-label="t('Select period')" @change="month=$event.target.value||'2026-09'"></div>
-        <label class="filter-label">{{ t('Cards') }}</label><label v-for="(card,index) in ['4329','8851']" :key="card" class="card-option"><span class="credit" :class="index?'blue':'yellow'"><b>{{ index?'●●':'VISA' }}</b></span><span><small>{{ t('Credit card') }}</small><br>•••• {{ card }}</span><input v-model="cards" type="checkbox" :value="card"></label>
+        <div class="cards-label"><span>{{ t('Cards') }}</span><button class="text-button" @click="cardDialog.open()">{{ t('Add card') }} ＋</button></div><div class="bank-card-list"><div v-for="card in bankCards" :key="card.id" class="bank-card-row"><button class="bank-card-edit" :aria-label="t('Edit card')+' '+t(card.name)" @click="cardDialog.open(card)"><span class="credit mini-card" :style="{background:card.color}"><b>{{ card.network }}</b></span><span class="bank-details"><strong>{{ t(card.name) }}</strong><small>•••• {{ card.last4 }} <span class="edit-hint">✎</span></small></span></button><input v-model="cards" type="checkbox" :value="card.id" :aria-label="t('Filter card')+' '+t(card.name)"></div></div>
         <label class="filter-label categories-label">{{ t('Categories') }}</label><div class="pills categories"><button v-for="item in filterCategories.slice(0,expanded?8:5)" :key="item" :class="{active:category===item}" @click="category=item">{{ t(item) }}</button><button class="show-more" @click="expanded=!expanded">{{ t(expanded?'Show less':'Show more') }}</button></div><div class="filter-note">{{ t('A little clarity. A better balance.') }}</div>
       </aside></div>
       <section class="reports"><div class="report-heading"><h2>{{ t('New report') }}</h2><div class="segmented"><button v-for="item in ['Overview','Income','Expenses']" :key="item" :class="{active:report===item}" @click="report=item">{{ t(item) }}</button></div><span class="report-date">{{ t('YOUR MONTH IN NUMBERS') }}</span></div>
@@ -87,9 +98,24 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
         </div>
       </section>
     </section>
-    <section v-else id="transactions"><div class="section-heading"><div><span class="eyebrow">{{ t('YOUR EVERYDAY MONEY') }}</span><h1>{{ t(page==='History'?'Transaction history':'Transactions') }}</h1></div><button class="primary" @click="openForm">{{ t('＋ Add transaction') }}</button></div><div class="list-toolbar"><input v-model="search" type="search" :placeholder="t('Search transactions…')"><span>{{ rows.length }} {{ language==='zh'?'笔交易':'transactions' }}</span></div><div class="table-wrap"><table><thead><tr><th v-for="item in ['Description','Category','Date','Card','Amount']" :key="item">{{ t(item) }}</th><th/></tr></thead><tbody><tr v-for="entry in rows" :key="entry.id"><td>{{ entry.id<300?t(entry.description):entry.description }}</td><td>{{ t(entry.category) }}</td><td>{{ entry.date }}</td><td>•••• {{ entry.card }}</td><td :class="entry.type">{{ entry.type==='income'?'+':'−' }}{{ money(entry.amount) }}</td><td><button :title="t('Delete transaction')" @click="remove(entry)">×</button></td></tr><tr v-if="!rows.length"><td colspan="6" class="empty-state">{{ t('No transactions found.') }}</td></tr></tbody></table></div></section>
+    <section v-else id="transactions">
+      <div class="section-heading"><div><span class="eyebrow">{{ t('YOUR EVERYDAY MONEY') }}</span><h1>{{ t(page==='History'?'Transaction history':'Transactions') }}</h1></div><button class="icon" :title="t('Export transactions')" @click="exportCsv">↥</button></div>
+      <div class="entry-portals">
+        <div v-for="kind in entryKinds" :key="kind.type" class="entry-portal" :class="[kind.type,{active:recordKind===kind.type&&page!=='History'}]">
+          <button class="portal-select" :aria-pressed="recordKind===kind.type&&page!=='History'" @click="recordKind=kind.type;page='Transactions';category='All categories';search=''"><span class="portal-icon">{{ kind.icon }}</span><span><small>{{ t(kind.label) }}</small><strong>{{ money(kind.type==='credit'?totalCredit:periodEntries.filter(e=>e.type===kind.type).reduce((s,e)=>s+e.amount,0)) }}</strong></span><span class="portal-arrow">↗</span></button>
+          <button class="portal-add" @click="openForm(kind.type)">＋ {{ t(kind.action) }}</button>
+        </div>
+      </div>
+      <div v-if="recordKind==='credit'&&page!=='History'" class="credit-explanation"><span>◇</span>{{ t('The latest limit replaces the previous limit. It is not income.') }}<span class="muted">{{ t('As of') }} {{ asOf }}</span></div>
+      <div class="list-toolbar"><input v-model="search" type="search" :placeholder="t('Search transactions…')"><span>{{ page==='History'?t('History'):t(entryKinds.find(k=>k.type===recordKind)?.label) }} · {{ rows.length }} {{ language==='zh'?'笔记录':'records' }}</span></div>
+      <div class="table-wrap"><table><thead><tr><th v-for="item in ['Description','Type','Category','Date','Card','Amount','Actions']" :key="item">{{ t(item) }}</th></tr></thead>
+        <TransitionGroup name="row" tag="tbody"><tr v-for="entry in rows" :key="entry.id"><td>{{ entry.id<300||entry.type==='credit'?t(entry.description):entry.description }}</td><td><span class="type-badge" :class="entry.type">{{ t(entryKinds.find(k=>k.type===entry.type)?.label) }}</span></td><td>{{ t(entry.category) }}</td><td>{{ entry.date }}</td><td>{{ cardName(entry.card) }}</td><td :class="entry.type">{{ entry.type==='credit'?'':entry.type==='income'?'+':'−' }}{{ money(entry.amount) }}</td><td><div class="row-actions"><button class="row-edit" :aria-label="t('Edit transaction')+' '+entry.description" @click="openForm(entry.type,entry)">✎ {{ t('Edit') }}</button><button class="row-delete" :aria-label="t('Delete transaction')+' '+entry.description" @click="remove(entry)">×</button></div></td></tr></TransitionGroup>
+        <tbody v-if="!rows.length"><tr><td colspan="7" class="empty-state">{{ t('No transactions found.') }}<button class="text-button empty-add" @click="openForm(recordKind)">＋ {{ t(entryKinds.find(k=>k.type===recordKind)?.action) }}</button></td></tr></tbody>
+      </table></div>
+    </section>
   </main>
   <footer><span class="footer-brand">cascade<span>®</span></span><span>{{ t('A clear view of your financial world.') }}</span><span>{{ t('Local workspace') }} <i class="live-dot"/></span></footer>
-  <dialog ref="dialog"><form @submit.prevent="add"><div class="card-heading"><h2>{{ t('Add transaction') }}</h2><button type="button" class="icon" @click="dialog.close()">×</button></div><p class="muted">{{ t('A small entry. A clearer picture.') }}</p><label>{{ t('Description') }}<input v-model="form.description" required maxlength="80" :placeholder="t('e.g. Groceries')"></label><div class="form-row"><label>{{ t('Amount ($)') }}<input v-model="form.amount" type="number" min="0.01" step="0.01" required placeholder="0.00"></label><label>{{ t('Type') }}<select v-model="form.type"><option value="expense">{{ t('Expense') }}</option><option value="income">{{ t('Income') }}</option></select></label></div><label>{{ t('Category') }}<select v-model="form.category"><option v-for="item in categoryOptions" :key="item" :value="item">{{ t(item) }}</option></select></label><div class="form-row"><label>{{ t('Date') }}<input v-model="form.date" type="date" required></label><label>{{ t('Card') }}<select v-model="form.card"><option value="4329">Visa •••• 4329</option><option value="8851">{{ t('Mastercard •••• 8851') }}</option></select></label></div><button class="primary submit" type="submit">{{ t('Save transaction ↗') }}</button></form></dialog>
+  <EntryDialog ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
+  <CardDialog ref="cardDialog" :t="t" @save="saveCard"/>
   <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button></div>
 </template>
