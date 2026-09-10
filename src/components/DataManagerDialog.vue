@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { createDataBackup, parseDataFile } from '../dataTransfer';
 
-const props = defineProps({ entries: Array, cards: Array, t: Function });
+const props = defineProps({ entries: Array, cards: Array, hiddenBuiltInCardIds: Array, t: Function });
 const emit = defineEmits(['import', 'notify']);
 const dialog = ref(null), fileInput = ref(null), pending = ref(null), error = ref('');
 
@@ -14,7 +14,7 @@ function open() {
 }
 
 function exportData() {
-  const backup = createDataBackup(props.entries, props.cards);
+  const backup = createDataBackup(props.entries, props.cards, new Date(), props.hiddenBuiltInCardIds);
   const url = URL.createObjectURL(new Blob([backup], { type: 'application/json;charset=utf-8' }));
   const link = document.createElement('a');
   link.href = url;
@@ -39,7 +39,7 @@ async function chooseFile(event) {
 
 function importData() {
   if (!pending.value) return;
-  emit('import', { entries: pending.value.entries, cards: pending.value.cards });
+  emit('import', { entries: pending.value.entries, cards: pending.value.cards, hiddenBuiltInCardIds: pending.value.hiddenBuiltInCardIds });
   emit('notify', 'Data imported');
   dialog.value.close();
   pending.value = null;

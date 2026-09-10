@@ -12,4 +12,6 @@ test('entry dialog calls the loan predicate and compiles all transaction card br
   assert.match(compiled.code,/isLoan\(\)/);
   assert.match(descriptor.template.content,/form\.type!==['"]credit['"]/);
   assert.match(descriptor.template.content,/v-else/);
+  assert.match(descriptor.scriptSetup.content,/resolveCreditAccountCard\(props\.cards, account\)/);
+  assert.doesNotMatch(descriptor.scriptSetup.content,/creditAccountCards\.find\(card => card\.name === account\)\?\.id/);
 });
