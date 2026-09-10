@@ -23,6 +23,19 @@ const builtInAccountCards = [...creditAccountCards, ...onlineBalanceCards];
 export const builtInAccountCardIds = new Set(builtInAccountCards.map(card => card.id));
 export const isBuiltInAccountCard = id => builtInAccountCardIds.has(id);
 
+export function resolveCreditAccountCard(cards, accountName) {
+  const definition = creditAccountCards.find(card => card.name === accountName);
+  if (!definition) return undefined;
+  return cards.find(card => card.id === definition.id) || cards.find(card => card.name === definition.name);
+}
+
+export function findLoanCard(cards, borrower, currentCardId) {
+  const normalizedBorrower = String(borrower ?? '').trim();
+  if (!normalizedBorrower) return undefined;
+  return cards.find(card => card.id === currentCardId && card.loanBorrower === normalizedBorrower) ||
+    cards.find(card => card.loanBorrower === normalizedBorrower);
+}
+
 export const defaultCards = [
   { id: '4329', name: 'Everyday card', last4: '4329', network: 'Visa', accountType: 'Savings card', color: '#f4cf35' },
   { id: '8851', name: 'Lifestyle card', last4: '8851', network: 'Mastercard', accountType: 'Savings card', color: '#2784f7' },

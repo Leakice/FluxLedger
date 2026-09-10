@@ -1,30 +1,33 @@
 <script setup>
-import { reactive, ref } from 'vue';
-import { creditAccountCards, entryKinds } from '../ledger';
+import { computed, reactive, ref } from 'vue';
+import { creditAccountCards, entryKinds, resolveCreditAccountCard } from '../ledger';
 const props = defineProps({ cards: Array, t: Function });
 const emit = defineEmits(['save']);
 const dialog = ref(null);
 const form = reactive({});
 const categories = ['Food & Drinks','Entertainment','Utilities','Shopping','Subscription','Other','Salary'];
 const loanAccount = '借款';
-const creditAccounts = [...creditAccountCards.map(card => card.name), loanAccount];
+const creditAccounts = computed(() => [
+  ...creditAccountCards.filter(card => resolveCreditAccountCard(props.cards, card.name)).map(card => card.name),
+  loanAccount
+]);
 const isLoan = () => form.type === 'credit' && form.description === loanAccount;
 function open(type, date, entry = null) {
-  const defaultCreditCard = creditAccountCards[0];
+  const defaultCreditCard = creditAccountCards.map(card => resolveCreditAccountCard(props.cards, card.name)).find(Boolean);
   const borrower = entry?.description === loanAccount ? entry.borrower || props.cards.find(card => card.id === entry.card)?.name || '' : '';
-  Object.assign(form, { id: null, description: type === 'credit' ? defaultCreditCard.name : '', amount: '', type, category: type === 'credit' ? 'Credit limit' : type === 'income' ? 'Salary' : 'Food & Drinks', date, card: type === 'credit' ? defaultCreditCard.id : props.cards[0]?.id || '', borrower }, entry || {});
+  Object.assign(form, { id: null, description: type === 'credit' ? defaultCreditCard?.name || loanAccount : '', amount: '', type, category: type === 'credit' ? 'Credit limit' : type === 'income' ? 'Salary' : 'Food & Drinks', date, card: type === 'credit' ? defaultCreditCard?.id || '' : props.cards[0]?.id || '', borrower }, entry || {});
   if (type === 'credit' && form.description === loanAccount) form.borrower = borrower;
   dialog.value.showModal();
 }
 function selectCreditAccount(account) {
-  form.card = creditAccountCards.find(card => card.name === account)?.id || '';
+  form.card = resolveCreditAccountCard(props.cards, account)?.id || '';
   if (account !== loanAccount) form.borrower = '';
 }
 function save() {
   const amount = Number(form.amount);
   const loan = isLoan();
   if (!Number.isFinite(amount) || (form.type === 'credit' ? amount < 0 : amount <= 0) || !form.description.trim() || (loan ? !form.borrower.trim() : !props.cards.some(card => card.id === form.card))) return;
-  const creditCard = creditAccountCards.find(card => card.name === form.description);
+  const creditCard = resolveCreditAccountCard(props.cards, form.description);
   const entry = { ...form, card: loan ? form.card : creditCard?.id || form.card, amount, description: form.description.trim(), category: form.type === 'credit' ? 'Credit limit' : form.category };
   if (loan) entry.borrower = form.borrower.trim(); else delete entry.borrower;
   emit('save', entry);

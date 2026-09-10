@@ -50,7 +50,9 @@ function normalizeEntries(value) {
     let id = normalizeId(entry.id, fallback + index + 1);
     while (usedIds.has(String(id))) id = fallback + index + usedIds.size + 1;
     usedIds.add(String(id));
-    return { id, description, amount, type, category, date, card };
+    const normalized = { id, description, amount, type, category, date, card };
+    if (typeof entry.borrower === 'string' && entry.borrower.trim()) normalized.borrower = entry.borrower.trim();
+    return normalized;
   });
 }
 
@@ -152,7 +154,13 @@ function parseCsv(text, cards) {
   return { format: 'csv', entries: normalizeEntries(entries), cards: normalizeCards(cards) };
 }
 
-export function createDataBackup(entries, cards, exportedAt = new Date()) {
+function normalizeHiddenBuiltInCardIds(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) fail('Hidden card data is invalid.');
+  return [...new Set(value.map(id => String(id ?? '').trim()).filter(Boolean))];
+}
+
+export function createDataBackup(entries, cards, exportedAt = new Date(), hiddenBuiltInCardIds = []) {
   const normalizedCards = normalizeCards(cards);
   const normalizedEntries = normalizeEntries(entries);
   validateCardReferences(normalizedEntries, normalizedCards);
@@ -161,7 +169,8 @@ export function createDataBackup(entries, cards, exportedAt = new Date()) {
     version: 1,
     exportedAt: exportedAt.toISOString(),
     transactions: normalizedEntries,
-    cards: normalizedCards
+    cards: normalizedCards,
+    hiddenBuiltInCardIds: normalizeHiddenBuiltInCardIds(hiddenBuiltInCardIds)
   }, null, 2);
 }
 
@@ -181,7 +190,8 @@ export function parseDataFile(text, options = {}) {
     const entries = normalizeEntries(rawEntries);
     const cards = normalizeCards(rawCards);
     validateCardReferences(entries, cards);
-    return { format: 'json', entries, cards };
+    const hiddenBuiltInCardIds = normalizeHiddenBuiltInCardIds(Array.isArray(payload) ? undefined : payload.hiddenBuiltInCardIds);
+    return { format: 'json', entries, cards, hiddenBuiltInCardIds };
   }
   return parseCsv(content, currentCards);
 }

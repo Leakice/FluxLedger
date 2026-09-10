@@ -3,7 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
 import { flowChart } from './charts';
-import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard } from './ledger';
+import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard } from './ledger';
 import EntryDialog from './components/EntryDialog.vue';
 import CardDialog from './components/CardDialog.vue';
 import DataManagerDialog from './components/DataManagerDialog.vue';
@@ -62,7 +62,7 @@ function navigate(next){page.value=next;if(next==='Dashboard')report.value='Over
 function reset(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';toast('Filters reset')}
 function openForm(type='expense',entry=null){entryDialog.value.open(type,month.value+'-10',entry)}
 function loanCardFor(borrower, currentCardId) {
-  const existing = bankCards.value.find(card => card.id === currentCardId && card.loanBorrower === borrower) || bankCards.value.find(card => card.loanBorrower === borrower);
+  const existing = findLoanCard(bankCards.value, borrower, currentCardId);
   if (existing) return existing.id;
   const card = { id: 'loan-'+Date.now(), name: borrower, last4: '', noLast4: true, network: '借款', accountType: 'Credit card', loanBorrower: borrower, color: '#627084' };
   bankCards.value.push(card);cards.value.push(card.id);
@@ -81,7 +81,7 @@ function removeCard(id){
 }
 function remove(entry){deleted.value=entry;entries.value=entries.value.filter(e=>e.id!==entry.id);toast('Transaction deleted')}
 function undo(){if(deleted.value){entries.value.push(deleted.value);deleted.value=null;notification.value=''}}
-function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.value=[];bankCards.value=withBuiltInAccountCards(payload.cards,hiddenBuiltInCardIds.value);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='expense';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
+function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.value=payload.hiddenBuiltInCardIds||[];bankCards.value=withBuiltInAccountCards(payload.cards,hiddenBuiltInCardIds.value);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='expense';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
 watch(bankCards,value=>localStorage.setItem('fluxledger-cards-v1',JSON.stringify(value)),{deep:true});
 watch(hiddenBuiltInCardIds,value=>localStorage.setItem('fluxledger-hidden-built-in-cards-v1',JSON.stringify(value)),{deep:true});
 watch(entries,value=>localStorage.setItem('cascade-transactions-v1',JSON.stringify(value)),{deep:true});
@@ -150,6 +150,6 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
   <footer><span class="footer-brand">cascade<span>®</span></span><span>{{ t('A clear view of your financial world.') }}</span><span>{{ t('Local workspace') }} <i class="live-dot"/></span></footer>
   <EntryDialog ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
   <CardDialog ref="cardDialog" :t="t" @save="saveCard" @remove="removeCard"/>
-  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :t="t" @import="importData" @notify="toast"/>
+  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :t="t" @import="importData" @notify="toast"/>
   <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button></div>
 </template>

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { creditLimit, periodEnd, buildFlowModel, creditAccountCards, onlineBalanceCards, withBuiltInAccountCards } from './ledger.js';
+import { creditLimit, periodEnd, buildFlowModel, creditAccountCards, onlineBalanceCards, withBuiltInAccountCards, resolveCreditAccountCard, findLoanCard } from './ledger.js';
 import { flowChart } from './charts.js';
 const cards=[{id:'a',name:'Daily',last4:'1234',color:'#888'},{id:'b',name:'Travel',last4:'5678',color:'#555'}];
 const entries=[
@@ -35,6 +35,20 @@ test('built-in migration preserves a name-matched card ID and does not add a dup
  assert.ok(!migrated.some(card=>card.id==='credit-baitiao'));
  const model=buildFlowModel([{...entries[0],card:'legacy-user-id'}],[],migrated,'2026-09-30');
  assert.equal(model.cards.find(card=>card.id==='legacy-user-id').income,100);
+});
+
+test('credit account selection resolves a migrated legacy ID from runtime cards',()=>{
+ const legacy={id:'legacy-baitiao-id',name:'白条',last4:'',noLast4:true,network:'Other',accountType:'Credit card',color:'#123456'};
+ const migrated=withBuiltInAccountCards([legacy]);
+ assert.equal(resolveCreditAccountCard(migrated,'白条'),migrated.find(card=>card.id===legacy.id));
+ assert.equal(resolveCreditAccountCard(migrated,'白条').id,'legacy-baitiao-id');
+ assert.ok(!migrated.some(card=>card.id==='credit-baitiao'));
+});
+
+test('loan identity prefers the restored entry card and never needs a duplicate',()=>{
+ const loan={id:'loan-legacy',name:'Alice',last4:'',network:'借款',color:'#627084',loanBorrower:'Alice'};
+ assert.equal(findLoanCard([loan],' Alice ','loan-legacy'),loan);
+ assert.equal(findLoanCard([loan],'Alice','missing'),loan);
 });
 
 test('built-in migration fills missing defaults without overwriting persisted edits',()=>{
