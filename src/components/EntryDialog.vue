@@ -27,7 +27,7 @@ function save() {
   const amount = Number(form.amount);
   const loan = isLoan();
   if (!Number.isFinite(amount) || (form.type === 'credit' ? amount < 0 : amount <= 0) || !form.description.trim() || (loan ? !form.borrower.trim() : !props.cards.some(card => card.id === form.card))) return;
-  const creditCard = resolveCreditAccountCard(props.cards, form.description);
+  const creditCard = form.type === 'credit' ? resolveCreditAccountCard(props.cards, form.description) : undefined;
   const entry = { ...form, card: loan ? form.card : creditCard?.id || form.card, amount, description: form.description.trim(), category: form.type === 'credit' ? 'Credit limit' : form.category };
   if (loan) entry.borrower = form.borrower.trim(); else delete entry.borrower;
   emit('save', entry);
