@@ -92,7 +92,7 @@ test('SVG escapes card names and never fabricates another income source',()=>{
  assert.ok(!/NaN|Infinity/.test(empty));
 });
 
-test('Sankey preserves rounded colored nodes with names, amounts and percentages inside',()=>{
+test('Sankey keeps empty rounded nodes in bounds and full information in metadata',()=>{
  const model=buildFlowModel(entries,entries,[{...cards[0],name:'银行卡很长的名称 <script> & extra description',last4:'9999'}],'2026-09-30');
  for(const width of [280,343,600,900]){
   const svg=flowChart(model,'Sankey diagram',s=>s,width);
@@ -104,6 +104,7 @@ test('Sankey preserves rounded colored nodes with names, amounts and percentages
   const groups=[...svg.matchAll(/<g class="flow-node">(.*?)<\/g>/g)].map(m=>m[1]);
   const columns=new Set();
   for(const group of groups){
+   assert.ok(!group.includes("<text"));
    const rect=group.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/);
    const [x,y,w,h]=rect.slice(1).map(Number);
    columns.add(x);
@@ -115,7 +116,7 @@ test('Sankey preserves rounded colored nodes with names, amounts and percentages
   }
   assert.equal(columns.size,3);
   const positions=[...columns].sort((a,b)=>a-b);
-  assert.ok(Math.abs(positions[1]+Math.min(150,width*.23)/2-width/2)<.01);
+  assert.ok(Math.abs(positions[1]-(positions[0]+positions[2])/2)<.01);
  }
 });
 

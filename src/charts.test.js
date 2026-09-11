@@ -29,10 +29,10 @@ test('no funding and no selected accounts remain renderable', () => {
   assert.match(flowChart({...zero,cards:[]},'Sankey diagram',t,320),/chart-empty/);
 });
 
-test('tiny streams remain proportional and centered inside minimum nodes',()=>{
+test('tiny nodes preserve the exact same scale as large nodes',()=>{
   const slots=flowSlots([.01,100],350,2);
-  assert.equal(slots[0].h,4);
-  assert.equal(slots[0].offset,1.99);
+  assert.equal(slots[0].h,.02);
+  assert.equal(slots[0].offset,0);
   assert.equal(slots[1].h,200);
   assert.equal(slots[1].offset,0);
 });
@@ -48,5 +48,15 @@ test('attached ribbons overlap nodes and retain equal thickness at both ends',()
       assert.ok(Number(value)>0);
     }
     assert.ok(paths.length>0);
+  }
+});
+
+test('rendered node heights follow exact values across columns and widths',()=>{
+  for(const width of [280,390,960]){
+    const svg=flowChart(model,'Sankey diagram',t,width);
+    const nodes=[...svg.matchAll(/class="flow-interactive-node"[^>]*data-value="([^"]+)"[^>]*>[\s\S]*?<rect[^>]*height="([^"]+)"/g)];
+    assert.ok(nodes.length>=5);
+    const scale=Number(nodes[0][2])/Number(nodes[0][1]);
+    for(const [,value,height] of nodes)assert.ok(Math.abs(Number(height)/Number(value)-scale)<1e-8);
   }
 });

@@ -219,3 +219,6 @@ body:has(dialog[open]) { overflow: hidden; }
 .flow-tooltip strong, .flow-tooltip span { display: block; }
 .flow-tooltip span:last-child { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .flow-interactive-node, .flow-ribbon { transition: none; } }
+
+/* SVG labels follow the same language-specific font as the surrounding UI. */
+#flow-chart svg text { font-family: inherit; font-weight: 400; letter-spacing: normal; }
