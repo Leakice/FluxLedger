@@ -107,7 +107,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
       <div class="language-switch" aria-label="Language / 语言"><button v-for="lang in ['en','zh']" :key="lang" :class="{selected:language===lang}" :aria-pressed="language===lang" @click="language=lang">{{ lang.toUpperCase() }}</button></div>
       <div class="theme-switch"><button :class="{selected:dark}" :title="t('Dark mode')" :aria-pressed="dark" @click="dark=true">☾</button><button :class="{selected:!dark}" :title="t('Light mode')" :aria-pressed="!dark" @click="dark=false">☼</button></div>
       <button class="icon notification" :aria-label="t('Notifications')" @click="toast('You’re all caught up. Your records are saved locally.')"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-2 7-2 9h16c0-2-2-2-2-9M9 21h6"/></svg><i/></button>
-      <button class="avatar" :title="t('Local account')" @click="toast('Local account · Data is stored in this browser')">JL</button>
+      <button class="avatar" :title="t('Local account')" @click="toast('Local account · Data is stored in this browser')">QY</button>
     </div>
   </header>
   <main>
