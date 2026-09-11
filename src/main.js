@@ -5,3 +5,5 @@ import '../style.css';
 createApp(App).mount('#app');
 
 import './responsive.css';
+
+import './reports.css';
