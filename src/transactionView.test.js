@@ -17,9 +17,9 @@ const entries = [
 const options = { month: '2026-09', period: 'month', cardIds: ['a'], category: 'All categories' };
 const ids = rows => rows.map(row => row.id);
 
-test('navigation has exactly two destinations and all four filters are translated', () => {
+test('navigation has exactly two destinations and all five filters are translated', () => {
   assert.deepEqual(navigationPages, ['Dashboard', 'Transactions']);
-  assert.deepEqual(transactionFilters.map(filter => filter.type), ['all', 'expense', 'income', 'credit']);
+  assert.deepEqual(transactionFilters.map(filter => filter.type), ['all', 'expense', 'income', 'repayment', 'credit']);
   for (const item of [...navigationPages, ...transactionFilters.map(filter => filter.label)]) assert.ok(dictionary[item]);
 });
 
@@ -54,4 +54,12 @@ test('search works in All and typed views for description, translated category a
   assert.deepEqual(ids(selectTransactionRows(entries, { ...translated, kind: 'credit', search: 'ALIPAY' })), [6,5]);
   assert.deepEqual(selectTransactionRows(entries, { ...translated, search: 'not present' }), []);
   assert.deepEqual(selectTransactionRows([], translated), []);
+});
+
+
+test('repayment filters match either account and the linked purchase category',()=>{
+ const purchase={id:'p',type:'expense',onCredit:true,card:'credit',category:'Shopping',description:'Laptop',date:'2026-08-01',amount:1000};
+ const payment={id:'r',type:'repayment',card:'cash',toCard:'credit',purchaseId:'p',category:'Repayments',description:'Payment',date:'2026-09-10',amount:400};
+ for(const cardIds of [['cash'],['credit']])assert.deepEqual(selectTransactionRows([purchase,payment],{kind:'repayment',month:'2026-09',cardIds,category:'Shopping'}),[payment]);
+ assert.deepEqual(selectTransactionRows([purchase,payment],{kind:'repayment',month:'2026-09',cardIds:['cash'],search:'credit'}),[payment]);
 });
