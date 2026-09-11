@@ -1,5 +1,5 @@
   export const dictionary = {
-    'Dashboard':'总览','Transactions':'交易记录','Analytics':'分析','History':'历史',
+    'Dashboard':'总览','Transactions':'交易记录',
     'Money Flow':'资金流向','Sankey diagram':'桑基图','Category breakdown':'分类明细',
     'Filters':'筛选','Time period':'时间范围','Month':'月度','Year':'年度','Cards':'银行卡',
     'Credit card':'信用卡','Categories':'分类','All categories':'全部分类',
@@ -14,7 +14,7 @@
     'In-store shopping':'线下消费','September':'九月','August':'八月','Apr':'4月','May':'5月',
     'Jun':'6月','Jul':'7月','Aug':'8月','Sep':'9月','Jan':'1月','Feb':'2月','Mar':'3月','Oct':'10月','Nov':'11月','Dec':'12月',
     'A clear view of your financial world.':'每一笔收支，都清清楚楚。','Local workspace':'本地工作区',
-    'YOUR EVERYDAY MONEY':'记录日常的每一笔','Transaction history':'交易历史',
+    'YOUR EVERYDAY MONEY':'记录日常的每一笔',
     '＋ Add transaction':'＋ 新增交易','Add transaction':'新增交易','Description':'交易说明','Category':'分类',
     'Date':'日期','Card':'银行卡','Amount':'金额','Amount (¥)':'金额（人民币）','Type':'类型','Expense':'支出',
     'A small entry. A clearer picture.':'记下一笔，看清生活。','Save transaction ↗':'保存交易 ↗',
@@ -46,3 +46,37 @@ Object.assign(dictionary, {"Data management":"数据管理","Backup & restore":"
 Object.assign(dictionary, {'Card type':'卡片类型','Savings card':'储蓄卡','Credit card':'信用卡','Online banking':'网银','Borrower':'借款人','e.g. Lender':'例如：借款人'});
 
 Object.assign(dictionary, {'Delete card':'删除银行卡','Card deleted':'银行卡已删除','Delete linked entries first':'请先删除或转移关联的交易记录'});
+
+Object.assign(dictionary, {
+  "Account": "账户",
+  "Accounts": "账户",
+  "Edit account": "编辑账户",
+  "Add account": "添加账户",
+  "Save account": "保存账户",
+  "Delete account": "删除账户",
+  "Account saved": "账户已保存",
+  "Account deleted": "账户已删除",
+  "Account name": "账户名称",
+  "Account type": "账户类型",
+  "Account color": "账户颜色",
+  "Bank / card network": "银行 / 卡组织",
+  "Filter account": "筛选账户",
+  "Account details can change. Linked transactions stay connected.": "修改账户信息后，已有记录仍会关联此账户。",
+  "e.g. Everyday account": "例如：日常账户",
+  "Alipay": "支付宝",
+  "WeChat Pay": "微信支付",
+  "2. Accounts": "2. 账户",
+  "Select an account to see your money flow.": "选择账户以查看资金流向。",
+  "Income and credit limit flow through accounts to expenses": "收入与信用额度经账户流向支出",
+  "Download transactions and accounts as a JSON backup.": "将交易和账户下载为 JSON 备份。",
+  "Transfer": "转账",
+  "The latest limit replaces the previous limit. It is not income.": "同一账户按最新生效记录设置额度，不重复累加，也不计入收入。",
+  "Card data is invalid.": "账户数据格式无效。",
+  "The file references a card that does not exist.": "文件引用了不存在的账户。"
+});
+
+Object.assign(dictionary, {'Other e-wallet':'其他电子钱包','Bank card':'普通银行卡'});
+
+Object.assign(dictionary, {'All':'全部'});
+
+Object.assign(dictionary, {'Online loan':'网贷','Loan provider':'金融平台','Online loan funding uses credit limits, not income.':'网贷资金通过信用额度记录，不计作收入。'});

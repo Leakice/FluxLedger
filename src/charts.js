@@ -1,3 +1,4 @@
+import { accountLast4 } from './ledger.js';
 const money = n => '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function ribbon(x1,y1,h1,x2,y2,h2,color) {
@@ -42,7 +43,7 @@ function insideNode(x,slot,width,color,name,value,total) {
 
 export function flowChart(model,chartType,t,width=960) {
   const {cards,income,credit,capacity}=model;
-  if(!cards.length)return '<div class="chart-empty">'+escapeHtml(t('Select a card to see your money flow.'))+'</div>';
+  if(!cards.length)return '<div class="chart-empty">'+escapeHtml(t('Select an account to see your money flow.'))+'</div>';
   const categories=[...new Set(cards.flatMap(c=>c.expenses.map(e=>e.category)))];
   const totals=categories.map(name=>({name,value:cards.reduce((s,c)=>s+c.expenses.filter(e=>e.category===name).reduce((a,e)=>a+e.amount,0),0)}));
   if(chartType==='Category breakdown') {
@@ -56,7 +57,7 @@ export function flowChart(model,chartType,t,width=960) {
   const canvasWidth=compact?Math.max(240,Math.floor(width)):960;
   const nodeWidth=compact?Math.min(150,canvasWidth*.27):38;
   const xs=compact?[2,(canvasWidth-nodeWidth)/2,canvasWidth-nodeWidth-2]:[14,400,777];
-  const names=[t('Income'),t('Credit limit'),...cards.map(c=>t(c.name)+(c.last4?' • '+c.last4:'')),...targets.map(g=>t(g.name))];
+  const names=[t('Income'),t('Credit limit'),...cards.map(c=>t(c.name)+(accountLast4(c)?' • '+accountLast4(c):'')),...targets.map(g=>t(g.name))];
   const values=[income,credit,...cards.map(c=>c.capacity),...targets.map(g=>g.value)];
   const minimum=compact?Math.max(...names.map((name,i)=>(nodeLines(name,values[i],nodeWidth).length+1)*15+20)):35;
   const height=compact?Math.max(350,64+Math.max(2,cards.length,targets.length)*(minimum+9)):Math.max(350,cards.length*65+60,targets.length*45+60);
@@ -84,8 +85,8 @@ export function flowChart(model,chartType,t,width=960) {
       used+=ch;targetUsed[j]+=th;
     });
   });
-  return '<svg class="sankey-chart" viewBox="0 0 '+canvasWidth+' '+height+'" role="img" aria-label="'+escapeHtml(t('Income and credit limit flow through cards to expenses'))+'"><defs><linearGradient id="income-flow"><stop stop-color="#8a5cf6" stop-opacity=".55"/><stop offset="1" stop-color="#5997fa" stop-opacity=".26"/></linearGradient><linearGradient id="credit-flow"><stop stop-color="#627084" stop-opacity=".45"/><stop offset="1" stop-color="#5189d6" stop-opacity=".3"/></linearGradient><linearGradient id="expense-flow"><stop stop-color="#2483ff" stop-opacity=".48"/><stop offset="1" stop-color="#39c4d9" stop-opacity=".28"/></linearGradient></defs><g font-family="Arial,Microsoft YaHei,sans-serif"><g font-size="11" fill="var(--muted)">'+['1. Source','2. Cards','3. Allocation'].map((name,i)=>'<text text-anchor="'+(compact?'middle':'start')+'" x="'+(xs[i]+(compact?nodeWidth/2:0))+'" y="18">'+(compact?wrapLabel(t(name),nodeWidth).map((line,j)=>'<tspan x="'+(xs[i]+nodeWidth/2)+'" y="'+(14+j*12)+'">'+escapeHtml(line)+'</tspan>').join(''):escapeHtml(t(name)))+'</text>').join('')+'</g>'+paths+
-    (compact ? [income,credit].map((v,i)=>insideNode(xs[0],ss[i],nodeWidth,i?'#343e4f':'#8855f5',t(i?'Credit limit':'Income'),v,capacity)).join('')+cards.map((c,i)=>insideNode(xs[1],cs[i],nodeWidth,c.color,t(c.name)+(c.last4?' • '+c.last4:''),c.capacity,capacity)).join('')+targets.map((g,i)=>insideNode(xs[2],ts[i],nodeWidth,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',t(g.name),g.value,Math.max(capacity,model.spent))).join('') : [income,credit].map((v,i)=>block(14,ss[i].y,ss[i].h,i?'#343e4f':'#8855f5',v,capacity)+label(59,ss[i].y+3,t(i?'Credit limit':'Income'),v)).join('')+
-    cards.map((c,i)=>'<g><title>'+escapeHtml(t(c.name)+(c.last4?' • '+c.last4:'')+': '+money(c.capacity))+'</title>'+block(400,cs[i].y,cs[i].h,c.color,c.capacity,capacity)+label(445,cs[i].y+3,t(c.name).slice(0,16)+(c.last4?' • '+c.last4:''),c.capacity)+'</g>').join('')+
+  return '<svg class="sankey-chart" viewBox="0 0 '+canvasWidth+' '+height+'" role="img" aria-label="'+escapeHtml(t('Income and credit limit flow through accounts to expenses'))+'"><defs><linearGradient id="income-flow"><stop stop-color="#8a5cf6" stop-opacity=".55"/><stop offset="1" stop-color="#5997fa" stop-opacity=".26"/></linearGradient><linearGradient id="credit-flow"><stop stop-color="#627084" stop-opacity=".45"/><stop offset="1" stop-color="#5189d6" stop-opacity=".3"/></linearGradient><linearGradient id="expense-flow"><stop stop-color="#2483ff" stop-opacity=".48"/><stop offset="1" stop-color="#39c4d9" stop-opacity=".28"/></linearGradient></defs><g font-family="Arial,Microsoft YaHei,sans-serif"><g font-size="11" fill="var(--muted)">'+['1. Source','2. Accounts','3. Allocation'].map((name,i)=>'<text text-anchor="'+(compact?'middle':'start')+'" x="'+(xs[i]+(compact?nodeWidth/2:0))+'" y="18">'+(compact?wrapLabel(t(name),nodeWidth).map((line,j)=>'<tspan x="'+(xs[i]+nodeWidth/2)+'" y="'+(14+j*12)+'">'+escapeHtml(line)+'</tspan>').join(''):escapeHtml(t(name)))+'</text>').join('')+'</g>'+paths+
+    (compact ? [income,credit].map((v,i)=>insideNode(xs[0],ss[i],nodeWidth,i?'#343e4f':'#8855f5',t(i?'Credit limit':'Income'),v,capacity)).join('')+cards.map((c,i)=>insideNode(xs[1],cs[i],nodeWidth,c.color,t(c.name)+(accountLast4(c)?' • '+accountLast4(c):''),c.capacity,capacity)).join('')+targets.map((g,i)=>insideNode(xs[2],ts[i],nodeWidth,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',t(g.name),g.value,Math.max(capacity,model.spent))).join('') : [income,credit].map((v,i)=>block(14,ss[i].y,ss[i].h,i?'#343e4f':'#8855f5',v,capacity)+label(59,ss[i].y+3,t(i?'Credit limit':'Income'),v)).join('')+
+    cards.map((c,i)=>'<g><title>'+escapeHtml(t(c.name)+(accountLast4(c)?' • '+accountLast4(c):'')+': '+money(c.capacity))+'</title>'+block(400,cs[i].y,cs[i].h,c.color,c.capacity,capacity)+label(445,cs[i].y+3,t(c.name).slice(0,16)+(accountLast4(c)?' • '+accountLast4(c):''),c.capacity)+'</g>').join('')+
     targets.map((g,i)=>'<g><title>'+escapeHtml(t(g.name)+': '+money(g.value))+'</title>'+block(777,ts[i].y,ts[i].h,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',g.value,Math.max(capacity,model.spent))+label(821,ts[i].y+2,t(g.name),g.value)+'</g>').join(''))+'</g></svg>';
 }

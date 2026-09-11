@@ -56,7 +56,7 @@ test('built-in migration fills missing defaults without overwriting persisted ed
  const normalized=withBuiltInAccountCards([persisted]);
  const card=normalized.find(item=>item.id==='credit-baitiao');
  assert.equal(normalized.filter(item=>item.id==='credit-baitiao').length,1);
- assert.deepEqual(card,{...creditAccountCards[0],...persisted});
+ assert.deepEqual(card,{...creditAccountCards[0],...persisted,accountTypeVersion:1});
  assert.equal(withBuiltInAccountCards([card]).find(item=>item.id===card.id).name,'My credit account');
 });
 
@@ -117,4 +117,26 @@ test('narrow Sankey keeps all three columns and wrapped labels inside colored no
   const positions=[...columns].sort((a,b)=>a-b);
   assert.ok(Math.abs(positions[1]+Math.min(150,width*.27)/2-width/2)<.01);
  }
+});
+
+
+test('legacy lender accounts migrate to online loans without losing IDs or credit history', () => {
+ const legacy = creditAccountCards.map(card => ({ ...card, accountType: 'Credit card', network: 'Other' }));
+ legacy[0].id = 'legacy-baitiao';
+ const migrated = withBuiltInAccountCards(legacy);
+ for (const old of legacy) {
+  const account = migrated.find(card => card.id === old.id);
+  assert.equal(account.accountType, 'Online loan');
+  assert.equal(account.network, old.name);
+  const records = [
+   { id: 1, type: 'credit', card: old.id, amount: 500, date: '2026-09-01', category: 'Credit limit' },
+   { id: 2, type: 'credit', card: old.id, amount: 800, date: '2026-09-10', category: 'Credit limit' },
+   { id: 3, type: 'expense', card: old.id, amount: 100, date: '2026-09-11', category: 'Shopping' }
+  ];
+  const model = buildFlowModel(records, records, [account], '2026-09-30');
+  assert.equal(model.income, 0); assert.equal(model.credit, 800);
+  assert.equal(model.capacity, 800); assert.equal(model.spent, 100);
+ }
+ assert.deepEqual(withBuiltInAccountCards(migrated), migrated);
+ assert.ok(!withBuiltInAccountCards([], ['credit-huabei']).some(card => card.id === 'credit-huabei'));
 });

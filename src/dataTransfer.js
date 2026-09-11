@@ -1,6 +1,6 @@
 import { dictionary } from './locales.js';
 
-const CATEGORY_NAMES = ['Food & Drinks','Entertainment','Utilities','Shopping','Subscription','Other','Salary','Income','Credit limit'];
+const CATEGORY_NAMES = ['Food & Drinks','Entertainment','Utilities','Shopping','Subscription','Other','Salary','Income','Credit limit','Transfer'];
 
 function fail(message) {
   throw new Error(message);
@@ -73,6 +73,7 @@ function normalizeCards(value) {
     const normalized = { id, name, last4, network, color };
     if (typeof card.noLast4 === 'boolean') normalized.noLast4 = card.noLast4;
     if (typeof card.accountType === 'string' && card.accountType.trim()) normalized.accountType = card.accountType.trim();
+    if (card.accountTypeVersion === 1) normalized.accountTypeVersion = 1;
     if (typeof card.loanBorrower === 'string' && card.loanBorrower.trim()) normalized.loanBorrower = card.loanBorrower.trim();
     return normalized;
   });
@@ -128,7 +129,7 @@ function parseCsv(text, cards) {
     type: findColumn(headers, ['Type','类型']),
     category: findColumn(headers, ['Category','分类']),
     date: findColumn(headers, ['Date','日期']),
-    card: findColumn(headers, ['Card','银行卡']),
+    card: findColumn(headers, ['Account','账户','Card','银行卡']),
     amount: findColumn(headers, ['Amount','Amount (¥)','Amount ($)','金额','金额（人民币）','金额（美元）'])
   };
   if (Object.values(columns).some(index => index < 0) || !rows.length) fail('No transaction data found.');
@@ -137,7 +138,7 @@ function parseCsv(text, cards) {
     const matches = cards.filter(item => {
       const names = new Set([item.name, dictionary[item.name]].filter(Boolean));
       return item.id === target || item.last4 === target ||
-        [...names].some(name => `${name} · ${item.last4}` === target);
+        [...names].some(name => (item.last4 ? `${name} · ${item.last4}` : name) === target);
     });
     if (matches.length !== 1) fail('The file references a card that does not exist.');
     return matches[0].id;
