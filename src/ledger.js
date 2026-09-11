@@ -1,3 +1,12 @@
+// Keep v1 field names and legacy type values; transactions reference only id.
+export const accountTypes = ['Savings card', 'Credit card', 'Online loan', 'Alipay', 'WeChat Pay', 'Online banking', 'Other'];
+export const accountTypeOf = account => account.accountType || 'Savings card';
+export const isBankAccount = account => ['Savings card', 'Credit card'].includes(accountTypeOf(account));
+export const isOnlineLoanAccount = account => !!account && accountTypeOf(account) === 'Online loan';
+export const loanProviders = ['白条', '花呗', '美团月付', '抖音月付', 'Other'];
+export const accountLast4 = account => isBankAccount(account) && !account.noLast4 ? account.last4 || '' : '';
+export const accountProvider = account => isBankAccount(account) || isOnlineLoanAccount(account) ? account.network : accountTypeOf(account);
+
 export const entryKinds = [
   { type: 'expense', label: 'Expenses', action: 'Add expense', icon: '↗' },
   { type: 'income', label: 'Income', action: 'Add income', icon: '↙' },
@@ -5,10 +14,10 @@ export const entryKinds = [
 ];
 
 export const creditAccountCards = [
-  { id: 'credit-baitiao', name: '白条', last4: '', noLast4: true, network: 'Other', accountType: 'Credit card', color: '#8659e7' },
-  { id: 'credit-huabei', name: '花呗', last4: '', noLast4: true, network: 'Other', accountType: 'Credit card', color: '#ed8d60' },
-  { id: 'credit-meituan', name: '美团月付', last4: '', noLast4: true, network: 'Other', accountType: 'Credit card', color: '#19ac87' },
-  { id: 'credit-douyin', name: '抖音月付', last4: '', noLast4: true, network: 'Other', accountType: 'Credit card', color: '#4c5868' },
+  { id: 'credit-baitiao', name: '白条', last4: '', noLast4: true, network: '白条', accountType: 'Online loan', color: '#8659e7' },
+  { id: 'credit-huabei', name: '花呗', last4: '', noLast4: true, network: '花呗', accountType: 'Online loan', color: '#ed8d60' },
+  { id: 'credit-meituan', name: '美团月付', last4: '', noLast4: true, network: '美团月付', accountType: 'Online loan', color: '#19ac87' },
+  { id: 'credit-douyin', name: '抖音月付', last4: '', noLast4: true, network: '抖音月付', accountType: 'Online loan', color: '#4c5868' },
 ];
 
 export const onlineBalanceCards = [
@@ -25,7 +34,7 @@ export const isBuiltInAccountCard = id => builtInAccountCardIds.has(id);
 
 export function resolveCreditAccountCard(cards, accountName) {
   const definition = creditAccountCards.find(card => card.name === accountName);
-  if (!definition) return undefined;
+  if (!definition) return cards.find(card => card.name === accountName && (isOnlineLoanAccount(card) || accountTypeOf(card) === 'Credit card'));
   return cards.find(card => card.id === definition.id) || cards.find(card => card.name === definition.name);
 }
 
@@ -59,7 +68,14 @@ export function withBuiltInAccountCards(cards, hiddenCardIds = []) {
     if (seenIds.has(card.id)) continue;
     seenIds.add(card.id);
     if (builtInCard) claimedBuiltInIds.add(builtInCard.id);
-    normalizedCards.push(builtInCard ? { ...builtInCard, ...card, id: card.id } : card);
+    const normalized = builtInCard ? { ...builtInCard, ...card, id: card.id } : card;
+    // These built-in lenders were incorrectly stored as credit cards in v1.
+    // Only change their classification; IDs, amounts and transaction types stay intact.
+    if (builtInCard && isOnlineLoanAccount(builtInCard)) {
+      normalized.accountType = 'Online loan';
+      if (!card.network || card.network === 'Other') normalized.network = builtInCard.network;
+    }
+    normalizedCards.push(normalized);
   }
 
   for (const builtInCard of visibleBuiltInCards) {

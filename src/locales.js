@@ -46,3 +46,35 @@ Object.assign(dictionary, {"Data management":"数据管理","Backup & restore":"
 Object.assign(dictionary, {'Card type':'卡片类型','Savings card':'储蓄卡','Credit card':'信用卡','Online banking':'网银','Borrower':'借款人','e.g. Lender':'例如：借款人'});
 
 Object.assign(dictionary, {'Delete card':'删除银行卡','Card deleted':'银行卡已删除','Delete linked entries first':'请先删除或转移关联的交易记录'});
+
+Object.assign(dictionary, {
+  "Account": "账户",
+  "Accounts": "账户",
+  "Edit account": "编辑账户",
+  "Add account": "添加账户",
+  "Save account": "保存账户",
+  "Delete account": "删除账户",
+  "Account saved": "账户已保存",
+  "Account deleted": "账户已删除",
+  "Account name": "账户名称",
+  "Account type": "账户类型",
+  "Account color": "账户颜色",
+  "Bank / card network": "银行 / 卡组织",
+  "Filter account": "筛选账户",
+  "Account details can change. Linked transactions stay connected.": "修改账户信息后，已有记录仍会关联此账户。",
+  "e.g. Everyday account": "例如：日常账户",
+  "Alipay": "支付宝",
+  "WeChat Pay": "微信支付",
+  "2. Accounts": "2. 账户",
+  "Select an account to see your money flow.": "选择账户以查看资金流向。",
+  "Income and credit limit flow through accounts to expenses": "收入与信用额度经账户流向支出",
+  "Download transactions and accounts as a JSON backup.": "将交易和账户下载为 JSON 备份。",
+  "Transfer": "转账",
+  "The latest limit replaces the previous limit. It is not income.": "同一账户按最新生效记录设置额度，不重复累加，也不计入收入。",
+  "Card data is invalid.": "账户数据格式无效。",
+  "The file references a card that does not exist.": "文件引用了不存在的账户。"
+});
+
+Object.assign(dictionary, {'Other e-wallet':'其他电子钱包','Bank card':'普通银行卡'});
+
+Object.assign(dictionary, {'Online loan':'网贷','Loan provider':'金融平台','Online loan funding uses credit limits, not income.':'网贷资金通过信用额度记录，不计作收入。'});

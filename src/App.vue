@@ -3,7 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
 import { flowChart } from './charts';
-import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard } from './ledger';
+import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount } from './ledger';
 import EntryDialog from './components/EntryDialog.vue';
 import CardDialog from './components/CardDialog.vue';
 import DataManagerDialog from './components/DataManagerDialog.vue';
@@ -19,10 +19,10 @@ const page=ref('Analytics'), report=ref('Overview'), period=ref('month'), month=
 const cards=ref(bankCards.value.map(c=>c.id)), category=ref('All categories'), expanded=ref(false), chartType=ref('Sankey diagram'), search=ref('');
 const notification=ref(''), deleted=ref(null), filtersOpen=ref(false);
 const asOf=computed(()=>periodEnd(month.value,period.value));
-const cardName=id=>{const card=bankCards.value.find(c=>c.id===id);return card?t(card.name)+(card.last4?' · '+card.last4:''):id};
+const cardName=id=>{const card=bankCards.value.find(c=>c.id===id);return card?t(card.name)+(accountLast4(card)?' · '+accountLast4(card):''):id};
 const limitFor=id=>creditLimit(entries.value,id,asOf.value);
 const totalCredit=computed(()=>bankCards.value.filter(c=>cards.value.includes(c.id)).reduce((s,c)=>s+limitFor(c.id),0));
-const filterCategories=['All categories','Food & Drinks','Subscription','Income','Shopping','Entertainment','Utilities','Other'];
+const filterCategories=['All categories','Food & Drinks','Subscription','Income','Shopping','Entertainment','Utilities','Transfer','Other'];
 const t=s=>language.value==='zh'?(dictionary[s]||s):s;
 const money=n=>'¥'+Math.abs(n).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const signed=n=>(n>=0?'+ ':'− ')+money(n);
@@ -69,15 +69,22 @@ function loanCardFor(borrower, currentCardId) {
   return card.id;
 }
 function saveEntry(entry){
+  if(entry.type==='income'&&isOnlineLoanAccount(bankCards.value.find(card=>card.id===entry.card))){toast('Online loan funding uses credit limits, not income.');return}
   if(entry.type==='credit'&&entry.description==='借款'&&entry.borrower){entry={...entry,card:loanCardFor(entry.borrower.trim(),entry.card),borrower:entry.borrower.trim()}}
   const existing=entries.value.findIndex(e=>e.id===entry.id);if(existing>=0)entries.value[existing]=entry;else entries.value.push({...entry,id:Date.now()});month.value=entry.date.slice(0,7);recordKind.value=entry.type;toast(existing>=0?'Transaction updated':'Transaction saved on this device')
 }
-function saveCard(card){if(card.id){const index=bankCards.value.findIndex(c=>c.id===card.id);bankCards.value[index]=card;}else{card.id='card-'+Date.now();bankCards.value.push(card);cards.value.push(card.id)}toast('Card saved')}
+function saveCard(card){
+  const isNew = !card.id;
+  if(card.id){const index=bankCards.value.findIndex(c=>c.id===card.id);bankCards.value[index]=card;}
+  else{card.id='card-'+Date.now();bankCards.value.push(card);cards.value.push(card.id)}
+  toast('Account saved');
+  if(isNew&&isOnlineLoanAccount(card))entryDialog.value.open('credit',month.value+'-10',{card:card.id,description:card.name});
+}
 function removeCard(id){
   if(entries.value.some(entry=>entry.card===id)){toast('Delete linked entries first');return}
   bankCards.value=bankCards.value.filter(card=>card.id!==id);cards.value=cards.value.filter(cardId=>cardId!==id);
   if(isBuiltInAccountCard(id)&&!hiddenBuiltInCardIds.value.includes(id))hiddenBuiltInCardIds.value.push(id);
-  toast('Card deleted');
+  toast('Account deleted');
 }
 function remove(entry){deleted.value=entry;entries.value=entries.value.filter(e=>e.id!==entry.id);toast('Transaction deleted')}
 function undo(){if(deleted.value){entries.value.push(deleted.value);deleted.value=null;notification.value=''}}
@@ -107,10 +114,10 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
         <p v-if="chartType!=='Sankey diagram'" class="chart-scroll-hint">↔ {{ t('Swipe to explore the money flow') }}</p><div ref="flowContainer" class="flow-scroll" :class="{'is-sankey':chartType==='Sankey diagram'}" tabindex="0" role="region" :aria-label="t(chartType==='Sankey diagram'?'Money Flow':'Money flow chart, scroll horizontally')"><div id="flow-chart" v-html="flow"/></div>
         <div class="flow-footer"><span><i class="live-dot"/>{{ t('Income + credit limit · capacity, not cash balance') }}</span><span>{{ periodLabel }} ↗</span></div><p v-if="flowModel.gap>0" class="funding-note">{{ t('Expenses above recorded funding') }}: {{ money(flowModel.gap) }}</p>
       </div>
-      <aside class="filter-panel" :class="{'is-expanded':filtersOpen}"><div class="aside-title"><h2 class="desktop-filter-title">{{ t('Filters') }}</h2><button class="mobile-filter-toggle" :aria-expanded="filtersOpen" aria-controls="filter-content" @click="filtersOpen=!filtersOpen"><span><strong>{{ t('Filters') }}</strong><small>{{ periodLabel }} · {{ cards.length }}/{{ bankCards.length }} {{ t('Cards') }} · {{ t(category) }}</small></span><span class="filter-chevron" aria-hidden="true">⌄</span></button><button class="icon" :title="t('Reset filters')" @click="reset">↺</button></div><div id="filter-content" class="filter-content">
+      <aside class="filter-panel" :class="{'is-expanded':filtersOpen}"><div class="aside-title"><h2 class="desktop-filter-title">{{ t('Filters') }}</h2><button class="mobile-filter-toggle" :aria-expanded="filtersOpen" aria-controls="filter-content" @click="filtersOpen=!filtersOpen"><span><strong>{{ t('Filters') }}</strong><small>{{ periodLabel }} · {{ cards.length }}/{{ bankCards.length }} {{ t('Accounts') }} · {{ t(category) }}</small></span><span class="filter-chevron" aria-hidden="true">⌄</span></button><button class="icon" :title="t('Reset filters')" @click="reset">↺</button></div><div id="filter-content" class="filter-content">
         <label class="filter-label">{{ t('Time period') }}</label><div class="pills" id="period"><button :class="{active:period==='month'}" @click="period='month'">{{ t('Month') }}</button><button :class="{active:period==='year'}" @click="period='year'">{{ t('Year') }}</button><input id="month" type="month" :value="month" :aria-label="t('Select period')" @change="month=$event.target.value||'2026-09'"></div>
-        <div class="cards-label"><span>{{ t('Cards') }}</span><button class="text-button" @click="cardDialog.open()">{{ t('Add card') }} ＋</button></div><div class="bank-card-list"><div v-for="card in bankCards" :key="card.id" class="bank-card-row"><button class="bank-card-edit" :aria-label="t('Edit card')+' '+t(card.name)" @click="cardDialog.open(card)"><span class="credit mini-card" :style="{background:card.color}"><b>{{ t(card.network) }}</b></span><span class="bank-details"><strong>{{ t(card.name) }}</strong><small v-if="card.last4">•••• {{ card.last4 }} <span class="edit-hint">✎</span></small></span></button><input v-model="cards" type="checkbox" :value="card.id" :aria-label="t('Filter card')+' '+t(card.name)"></div></div>
-        <label class="filter-label categories-label">{{ t('Categories') }}</label><div class="pills categories"><button v-for="item in filterCategories.slice(0,expanded?8:5)" :key="item" :class="{active:category===item}" @click="category=item">{{ t(item) }}</button><button class="show-more" @click="expanded=!expanded">{{ t(expanded?'Show less':'Show more') }}</button></div><div class="filter-note">{{ t('A little clarity. A better balance.') }}</div>
+        <div class="cards-label"><span>{{ t('Accounts') }}</span><button class="text-button" @click="cardDialog.open()">{{ t('Add account') }} ＋</button></div><div class="bank-card-list"><div v-for="card in bankCards" :key="card.id" class="bank-card-row"><button class="bank-card-edit" :aria-label="t('Edit account')+' '+t(card.name)" @click="cardDialog.open(card)"><span class="credit mini-card" :style="{background:card.color}"><b>{{ t(accountProvider(card)) }}</b></span><span class="bank-details"><strong>{{ t(card.name) }}</strong><small v-if="accountLast4(card)">•••• {{ accountLast4(card) }} <span class="edit-hint">✎</span></small></span></button><input v-model="cards" type="checkbox" :value="card.id" :aria-label="t('Filter account')+' '+t(card.name)"></div></div>
+        <label class="filter-label categories-label">{{ t('Categories') }}</label><div class="pills categories"><button v-for="item in filterCategories.slice(0,expanded?filterCategories.length:5)" :key="item" :class="{active:category===item}" @click="category=item">{{ t(item) }}</button><button class="show-more" @click="expanded=!expanded">{{ t(expanded?'Show less':'Show more') }}</button></div><div class="filter-note">{{ t('A little clarity. A better balance.') }}</div>
       </div></aside></div>
       <section class="reports"><div class="report-heading"><h2>{{ t('New report') }}</h2><div class="segmented"><button v-for="item in ['Overview','Income','Expenses']" :key="item" :class="{active:report===item}" @click="report=item">{{ t(item) }}</button></div><span class="report-date">{{ t('YOUR MONTH IN NUMBERS') }}</span></div>
         <div class="report-grid"><div class="left-reports"><article class="revenue"><span class="muted">{{ t(revenueLabel) }}</span><div><strong>{{ report==='Expenses'?money(revenue):signed(revenue) }}</strong><span class="growth" :title="t('Net revenue change from previous month')">{{ growth }}</span></div></article>
@@ -131,7 +138,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
       </div>
       <div v-if="recordKind==='credit'&&page!=='History'" class="credit-explanation"><span>◇</span>{{ t('The latest limit replaces the previous limit. It is not income.') }}<span class="muted">{{ t('As of') }} {{ asOf }}</span></div>
       <div class="list-toolbar"><input v-model="search" type="search" :placeholder="t('Search transactions…')"><span>{{ page==='History'?t('History'):t(entryKinds.find(k=>k.type===recordKind)?.label) }} · {{ rows.length }} {{ language==='zh'?'笔记录':'records' }}</span></div>
-      <div class="table-wrap desktop-transactions"><table><thead><tr><th v-for="item in ['Description','Type','Category','Date','Card','Amount','Actions']" :key="item">{{ t(item) }}</th></tr></thead>
+      <div class="table-wrap desktop-transactions"><table><thead><tr><th v-for="item in ['Description','Type','Category','Date','Account','Amount','Actions']" :key="item">{{ t(item) }}</th></tr></thead>
         <TransitionGroup name="row" tag="tbody"><tr v-for="entry in rows" :key="entry.id"><td>{{ entry.id<300||entry.type==='credit'?t(entry.description):entry.description }}</td><td><span class="type-badge" :class="entry.type">{{ t(entryKinds.find(k=>k.type===entry.type)?.label) }}</span></td><td>{{ t(entry.category) }}</td><td>{{ entry.date }}</td><td>{{ cardName(entry.card) }}</td><td :class="entry.type">{{ entry.type==='credit'?'':entry.type==='income'?'+':'−' }}{{ money(entry.amount) }}</td><td><div class="row-actions"><button class="row-edit" :aria-label="t('Edit transaction')+' '+entry.description" @click="openForm(entry.type,entry)">✎ {{ t('Edit') }}</button><button class="row-delete" :aria-label="t('Delete transaction')+' '+entry.description" @click="remove(entry)">×</button></div></td></tr></TransitionGroup>
         <tbody v-if="!rows.length"><tr><td colspan="7" class="empty-state">{{ t('No transactions found.') }}<button class="text-button empty-add" @click="openForm(recordKind)">＋ {{ t(entryKinds.find(k=>k.type===recordKind)?.action) }}</button></td></tr></tbody>
       </table></div>
@@ -140,7 +147,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
           <div class="transaction-card-heading"><span class="type-badge" :class="entry.type">{{ t(entryKinds.find(k=>k.type===entry.type)?.label) }}</span><time :datetime="entry.date">{{ entry.date }}</time></div>
           <h3>{{ entry.id<300||entry.type==='credit'?t(entry.description):entry.description }}</h3>
           <strong class="transaction-amount" :class="entry.type">{{ entry.type==='credit'?'':entry.type==='income'?'+':'−' }}{{ money(entry.amount) }}</strong>
-          <dl><div><dt>{{ t('Category') }}</dt><dd>{{ t(entry.category) }}</dd></div><div><dt>{{ t('Card') }}</dt><dd>{{ cardName(entry.card) }}</dd></div></dl>
+          <dl><div><dt>{{ t('Category') }}</dt><dd>{{ t(entry.category) }}</dd></div><div><dt>{{ t('Account') }}</dt><dd>{{ cardName(entry.card) }}</dd></div></dl>
           <div class="row-actions"><button class="row-edit" :aria-label="t('Edit transaction')+' '+entry.description" @click="openForm(entry.type,entry)">✎ {{ t('Edit') }}</button><button class="row-delete" :aria-label="t('Delete transaction')+' '+entry.description" @click="remove(entry)">× {{ t('Delete') }}</button></div>
         </li>
       </TransitionGroup>

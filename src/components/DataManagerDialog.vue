@@ -60,7 +60,7 @@ defineExpose({ open });
     <div class="data-actions">
       <button type="button" class="data-action" @click="exportData">
         <span class="data-action-icon" aria-hidden="true">↓</span>
-        <span class="data-action-copy"><strong>{{ t('Export data') }}</strong><small>{{ t('Download transactions and cards as a JSON backup.') }}</small></span>
+        <span class="data-action-copy"><strong>{{ t('Export data') }}</strong><small>{{ t('Download transactions and accounts as a JSON backup.') }}</small></span>
         <span class="data-action-arrow" aria-hidden="true">↗</span>
       </button>
       <button type="button" class="data-action" @click="fileInput.click()">
@@ -73,7 +73,7 @@ defineExpose({ open });
     <p v-if="error" class="data-error" role="alert">{{ t(error) }}</p>
     <div v-if="pending" class="data-import-preview">
       <div class="import-preview-heading"><strong>{{ t('Ready to import') }}</strong><small>{{ pending.fileName }}</small></div>
-      <div class="import-preview-counts"><span><b>{{ pending.entries.length }}</b> {{ t('Transactions') }}</span><span><b>{{ pending.cards.length }}</b> {{ t('Cards') }}</span></div>
+      <div class="import-preview-counts"><span><b>{{ pending.entries.length }}</b> {{ t('Transactions') }}</span><span><b>{{ pending.cards.length }}</b> {{ t('Accounts') }}</span></div>
       <p>{{ t('This replaces the current local data.') }}</p>
       <button type="button" class="primary submit" @click="importData">{{ t('Import and replace') }}</button>
     </div>
