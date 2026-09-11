@@ -97,13 +97,3 @@ test('import rejects transactions that reference an unknown card',()=>{
   const payload=JSON.stringify({transactions:[{...entries[0],card:'missing'}],cards});
   assert.throws(()=>parseDataFile(payload,{cards:[]}),/card that does not exist/);
 });
-
-
-test('credit purchase flags and repayment UUID links survive backup round trips',()=>{
- const purchase={...entries[1],id:'purchase-uuid',onCredit:true,amount:1000,card:'8851'};
- const payment={...entries[1],id:'payment-uuid',type:'repayment',category:'Repayments',amount:400,card:'4329',toCard:'8851',purchaseId:purchase.id};
- const records=[entries[0],purchase,payment];
- assert.deepEqual(parseDataFile(createDataBackup(records,cards)).entries,records);
- for(const patch of [{purchaseId:'missing'},{toCard:'missing'},{amount:1001}])assert.throws(()=>createDataBackup([purchase,{...payment,...patch}],cards));
- assert.throws(()=>parseDataFile(JSON.stringify({transactions:[purchase,{...purchase},payment],cards})),/Duplicate/);
-});

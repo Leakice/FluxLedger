@@ -1,7 +1,6 @@
-import { validateLedger } from './ledger.js';
 import { dictionary } from './locales.js';
 
-const CATEGORY_NAMES = ['Food & Drinks','Entertainment','Utilities','Shopping','Subscription','Other','Salary','Income','Credit limit','Transfer','Repayments'];
+const CATEGORY_NAMES = ['Food & Drinks','Entertainment','Utilities','Shopping','Subscription','Other','Salary','Income','Credit limit','Transfer'];
 
 function fail(message) {
   throw new Error(message);
@@ -9,7 +8,6 @@ function fail(message) {
 
 function entryType(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  if (['repayment','repayments','信用还款'].includes(normalized)) return 'repayment';
   if (normalized === 'income' || normalized === '收入') return 'income';
   if (normalized === 'credit' || normalized === 'credit limit' || normalized === '信用额度') return 'credit';
   if (normalized === 'expense' || normalized === 'expenses' || normalized === '支出') return 'expense';
@@ -31,13 +29,12 @@ function normalizeId(value, fallback) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const text = String(value ?? '').trim();
   if (/^\d+$/.test(text)) return Number(text);
-  return text || fallback;
+  return fallback;
 }
 
 function normalizeEntries(value) {
   if (!Array.isArray(value)) fail('No transaction data found.');
   const usedIds = new Set();
-  const hasRepayments=value.some(e=>['repayment','repayments','信用还款'].includes(String(e?.type).toLowerCase()));
   const fallback = Date.now();
   return value.map((entry, index) => {
     if (!entry || typeof entry !== 'object') fail('Transaction data is invalid.');
@@ -51,13 +48,10 @@ function normalizeEntries(value) {
       fail('Transaction data is invalid.');
     }
     let id = normalizeId(entry.id, fallback + index + 1);
-    if (hasRepayments && usedIds.has(String(id))) fail('Duplicate transaction');
     while (usedIds.has(String(id))) id = fallback + index + usedIds.size + 1;
     usedIds.add(String(id));
     const normalized = { id, description, amount, type, category, date, card };
     if (typeof entry.borrower === 'string' && entry.borrower.trim()) normalized.borrower = entry.borrower.trim();
-    if(typeof entry.onCredit==='boolean')normalized.onCredit=entry.onCredit;
-    if(type==='repayment'){normalized.toCard=String(entry.toCard??'').trim();normalized.purchaseId=normalizeId(entry.purchaseId,'');}
     return normalized;
   });
 }
@@ -87,8 +81,7 @@ function normalizeCards(value) {
 
 function validateCardReferences(entries, cards) {
   const cardIds = new Set(cards.map(card => card.id));
-  if (entries.some(entry => !cardIds.has(entry.card) || (entry.type==='repayment'&&!cardIds.has(entry.toCard)))) fail('The file references a card that does not exist.');
-  if(entries.some(e=>e.onCredit||e.type==='repayment')){const error=validateLedger(entries,cards);if(error)fail(error);}
+  if (entries.some(entry => !cardIds.has(entry.card))) fail('The file references a card that does not exist.');
 }
 
 function parseCsvRows(text) {

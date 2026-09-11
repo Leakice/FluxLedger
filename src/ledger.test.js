@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { creditLimit, periodEnd, buildFlowModel, creditAccountCards, onlineBalanceCards, withBuiltInAccountCards, resolveCreditAccountCard, findLoanCard } from './ledger.js';
-import { flowChart, repaymentChart } from './charts.js';
-const cards=[{id:'a',name:'Daily',last4:'1234',color:'#888',accountType:'Savings card'},{id:'b',name:'Travel',last4:'5678',color:'#555',accountType:'Credit card'}];
+import { flowChart } from './charts.js';
+const cards=[{id:'a',name:'Daily',last4:'1234',color:'#888'},{id:'b',name:'Travel',last4:'5678',color:'#555'}];
 const entries=[
  {id:1,type:'income',card:'a',amount:100,date:'2026-09-01',category:'Salary'},
  {id:2,type:'expense',card:'a',amount:140,date:'2026-09-02',category:'Food & Drinks'},
@@ -92,7 +92,7 @@ test('SVG escapes card names and never fabricates another income source',()=>{
  assert.ok(!/NaN|Infinity/.test(empty));
 });
 
-test('Sankey keeps empty rounded nodes in bounds and full information in metadata',()=>{
+test('narrow Sankey keeps all three columns and wrapped labels inside colored nodes',()=>{
  const model=buildFlowModel(entries,entries,[{...cards[0],name:'银行卡很长的名称 <script> & extra description',last4:'9999'}],'2026-09-30');
  for(const width of [280,343,600,900]){
   const svg=flowChart(model,'Sankey diagram',s=>s,width);
@@ -104,7 +104,6 @@ test('Sankey keeps empty rounded nodes in bounds and full information in metadat
   const groups=[...svg.matchAll(/<g class="flow-node">(.*?)<\/g>/g)].map(m=>m[1]);
   const columns=new Set();
   for(const group of groups){
-   assert.ok(!group.includes("<text"));
    const rect=group.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/);
    const [x,y,w,h]=rect.slice(1).map(Number);
    columns.add(x);
@@ -116,7 +115,7 @@ test('Sankey keeps empty rounded nodes in bounds and full information in metadat
   }
   assert.equal(columns.size,3);
   const positions=[...columns].sort((a,b)=>a-b);
-  assert.ok(Math.abs(positions[1]-(positions[0]+positions[2])/2)<.01);
+  assert.ok(Math.abs(positions[1]+Math.min(150,width*.27)/2-width/2)<.01);
  }
 });
 
@@ -140,104 +139,4 @@ test('legacy lender accounts migrate to online loans without losing IDs or credi
  }
  assert.deepEqual(withBuiltInAccountCards(migrated), migrated);
  assert.ok(!withBuiltInAccountCards([], ['credit-huabei']).some(card => card.id === 'credit-huabei'));
-});
-
-import { accountBalances, creditPurchases, saveTransaction, validateLedger } from './ledger.js';
-const creditRecords = [
- {id:'salary',type:'income',card:'a',amount:2000,date:'2026-08-01',category:'Salary'},
- {id:'purchase',type:'expense',onCredit:true,card:'b',amount:1000,date:'2026-08-02',description:'Laptop',category:'Shopping'},
-];
-const repayment = {id:'r1',type:'repayment',card:'a',toCard:'b',purchaseId:'purchase',amount:400,date:'2026-09-10',description:'First payment'};
-test('partial and full repayments reconcile cash, debt, status and expense statistics',()=>{
- const partial=saveTransaction(creditRecords,repayment,cards);
- assert.deepEqual(creditPurchases(partial).map(p=>[p.paid,p.due,p.status]),[[400,600,'Partially paid']]);
- assert.deepEqual(accountBalances(partial,cards,'2026-09-30').map(c=>[c.cash,c.debt]),[[1600,0],[0,600]]);
- const full=saveTransaction(partial,{...repayment,id:'r2',amount:600},cards);
- assert.deepEqual(creditPurchases(full).map(p=>[p.paid,p.due,p.status]),[[1000,0,'Paid']]);
- assert.deepEqual(accountBalances(full,cards,'2026-09-30').map(c=>[c.cash,c.debt]),[[1000,0],[0,0]]);
- assert.equal(buildFlowModel(full,full,cards,'2026-09-30').spent,1000);
- assert.equal(buildFlowModel(full,full,cards,'2026-09-30').income,2000);
-});
-test('retry, edit, deletion and restoration do not double-post money',()=>{
- const partial=saveTransaction(creditRecords,repayment,cards);
- const retry=saveTransaction(partial,repayment,cards);
- assert.equal(retry.length,3);
- assert.equal(creditPurchases(retry)[0].due,600);
- const edited=saveTransaction(retry,{...repayment,amount:250},cards);
- assert.equal(creditPurchases(edited)[0].due,750);
- const removed=edited.filter(e=>e.id!=='r1');
- assert.equal(creditPurchases(removed)[0].status,'Unpaid');
- assert.equal(accountBalances(removed,cards,'2026-09-30')[0].cash,2000);
- assert.equal(creditPurchases(saveTransaction(removed,repayment,cards))[0].due,600);
-});
-test('invalid links, dates, amounts, duplicates and changes to paid purchases are rejected',()=>{
- for(const patch of [{amount:1001},{amount:-1},{amount:0},{amount:0.001},{amount:NaN},{toCard:'a'},{card:'b'},{purchaseId:'missing'},{date:'2026-07-01'},{date:'2026-02-30'}]) {
-  assert.throws(()=>saveTransaction(creditRecords,{...repayment,...patch},cards));
- }
- const partial=saveTransaction(creditRecords,repayment,cards);
- assert.throws(()=>saveTransaction(partial,{...repayment,id:'r2',amount:601},cards));
- assert.throws(()=>saveTransaction(partial,{...creditRecords[1],amount:399},cards));
- const normalized=saveTransaction(partial,{...creditRecords[1],onCredit:false},cards);
- assert.equal(normalized.find(e=>e.id==='purchase').onCredit,true);
- assert.throws(()=>saveTransaction(partial,{...creditRecords[1],card:'a'},cards));
- assert.ok(validateLedger(partial.filter(e=>e.id!=='purchase'),cards));
- assert.ok(validateLedger([...partial,repayment],cards));
-});
-test('cent arithmetic settles decimal amounts exactly and historical balance excludes future payments',()=>{
- const tiny=[{...creditRecords[1],amount:0.3}];
- const first=saveTransaction(tiny,{...repayment,amount:0.1},cards);
- const full=saveTransaction(first,{...repayment,id:'r2',amount:0.2,date:'2026-10-01'},cards);
- assert.equal(creditPurchases(full)[0].due,0);
- assert.equal(creditPurchases(full,'2026-09-30')[0].due,0.2);
- assert.equal(accountBalances(full,cards,'2026-09-30')[0].cash,-0.1);
-});
-test('repayment Sankey retains both endpoints with one selected account and links prior-month purchases',()=>{
- const all=saveTransaction(creditRecords,repayment,cards);
- for(const selected of [[cards[0]],[cards[1]],cards]) {
-  const model=buildFlowModel([repayment],all,selected,'2026-09-30','Shopping',cards);
-  assert.equal(model.repayments.length,1);
-  assert.equal(model.spent,0);
-  const html=repaymentChart(model,s=>s);
-  assert.ok(html.includes('Daily · 1234 → Travel · 5678'));
-  assert.ok(html.includes('Laptop'));
-  assert.ok(html.includes('¥400.00'));
-  assert.ok(!/NaN|Infinity/.test(html));
-  assert.ok(!flowChart(model,'Category breakdown',s=>s).includes('Repayment flow'));
- }
- assert.equal(buildFlowModel([repayment],all,cards,'2026-09-30','Utilities').repayments.length,0);
- assert.equal(buildFlowModel([repayment],all,cards,'2026-08-31').repayments.length,0);
-});
-test('repayment graph escapes descriptions and account names',()=>{
- const all=saveTransaction(creditRecords,{...repayment,description:'<script>alert(1)</script>'},cards);
- const model=buildFlowModel(all,all,[{...cards[0],name:'<img src=x>'},cards[1]],'2026-09-30');
- const html=repaymentChart(model,s=>s);
- assert.ok(!html.includes('<script>'));assert.ok(!html.includes('<img'));
-});
-
-test('same-day credit limits work with UUID record identifiers',()=>{
- const limits=[{type:'credit',card:'a',id:'old-uuid',amount:100,date:'2026-09-01'},{type:'credit',card:'a',id:'new-uuid',amount:200,date:'2026-09-01'}];
- assert.equal(creditLimit(limits,'a','2026-09-30'),200);
-});
-
-test('automatic credit expenses participate in repayment and balances',async()=>{
-  const {saveTransaction,creditPurchases,accountBalances,inferCreditExpenses}=await import('./ledger.js');
-  const accounts=[{id:'cash',accountType:'Savings card'},{id:'credit',accountType:'Credit card'},{id:'loan',accountType:'Online loan'}];
-  const expense={id:'p',type:'expense',card:'credit',amount:100,date:'2026-09-10',description:'Purchase',category:'Other',onCredit:false};
-  let ledger=saveTransaction([],expense,accounts);
-  assert.equal(ledger[0].onCredit,true);
-  assert.equal(inferCreditExpenses([{...expense,card:'loan'}],accounts)[0].onCredit,true);
-  ledger=saveTransaction(ledger,{id:'r',type:'repayment',card:'cash',toCard:'credit',purchaseId:'p',amount:40,date:'2026-09-11'},accounts);
-  assert.equal(creditPurchases(ledger)[0].due,60);
-  assert.equal(accountBalances(ledger,accounts,'2026-09-30').find(c=>c.id==='credit').cash,0);
-  assert.equal(accountBalances(ledger,accounts,'2026-09-30').find(c=>c.id==='cash').cash,-40);
-});
-
-test("credit inference clears stale flags from non-credit expenses",async()=>{
-  const {accountBalances,creditPurchases,inferCreditExpenses}=await import("./ledger.js");
-  const accounts=[{id:"cash",accountType:"Savings card"},{id:"credit",accountType:"Credit card"}];
-  const stale={id:"stale",type:"expense",card:"cash",amount:100,date:"2026-09-10",description:"Cash purchase",category:"Other",onCredit:true};
-  const normalized=inferCreditExpenses([stale],accounts);
-  assert.equal(normalized[0].onCredit,false);
-  assert.equal(creditPurchases(normalized).length,0);
-  assert.equal(accountBalances(normalized,accounts,"2026-09-30").find(c=>c.id==="cash").cash,-100);
 });
