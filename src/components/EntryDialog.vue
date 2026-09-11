@@ -1,19 +1,21 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
-import { creditAccountCards, entryKinds, resolveCreditAccountCard, accountLast4, isOnlineLoanAccount, accountTypeOf } from '../ledger';
+import { creditAccountCards, entryKinds, resolveCreditAccountCard, accountLast4, isOnlineLoanAccount, accountTypeOf, canRecordIncome } from '../ledger';
 const props = defineProps({ cards: Array, t: Function });
 const emit = defineEmits(['save']);
 const dialog = ref(null);
 const form = reactive({});
+const originalEntry = ref(null);
 const categories = ['Food & Drinks','Entertainment','Utilities','Shopping','Subscription','Other','Salary','Transfer'];
 const loanAccount = '借款';
 const creditAccounts = computed(() => [
   ...creditAccountCards.filter(card => resolveCreditAccountCard(props.cards, card.name)).map(card => card.name),
   loanAccount
 ]);
-const availableCards = computed(() => props.cards.filter(card => form.type !== 'income' || !isOnlineLoanAccount(card)));
+const availableCards = computed(() => props.cards.filter(card => form.type !== 'income' || canRecordIncome(card, originalEntry.value)));
 const isLoan = () => form.type === 'credit' && form.description === loanAccount;
 function open(type, date, entry = null) {
+  originalEntry.value = entry?.id != null ? { ...entry } : null;
   const defaultCreditCard = creditAccountCards.map(card => resolveCreditAccountCard(props.cards, card.name)).find(Boolean) || props.cards.find(card => isOnlineLoanAccount(card) || accountTypeOf(card) === 'Credit card');
   const borrower = entry?.description === loanAccount ? entry.borrower || props.cards.find(card => card.id === entry.card)?.name || '' : '';
   Object.assign(form, { id: null, description: type === 'credit' ? defaultCreditCard?.name || loanAccount : '', amount: '', type, category: type === 'credit' ? 'Credit limit' : type === 'income' ? 'Salary' : 'Food & Drinks', date, card: type === 'credit' ? defaultCreditCard?.id || '' : props.cards.find(card => type !== 'income' || !isOnlineLoanAccount(card))?.id || '', borrower }, entry || {});
@@ -31,7 +33,6 @@ function save() {
   const amount = Number(form.amount);
   const loan = isLoan();
   if (!Number.isFinite(amount) || (form.type === 'credit' ? amount < 0 : amount <= 0) || !form.description.trim() || (loan ? !form.borrower.trim() : !availableCards.value.some(card => card.id === form.card))) return;
-  const creditCard = form.type === 'credit' ? resolveCreditAccountCard(props.cards, form.description) : undefined;
   const entry = { ...form, amount, description: form.description.trim(), category: form.type === 'credit' ? 'Credit limit' : form.category };
   if (loan) entry.borrower = form.borrower.trim(); else delete entry.borrower;
   emit('save', entry);

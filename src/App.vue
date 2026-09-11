@@ -3,7 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
 import { flowChart } from './charts';
-import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount } from './ledger';
+import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome } from './ledger';
 import { navigationPages, transactionFilters, selectTransactionRows } from './transactionView';
 import EntryDialog from './components/EntryDialog.vue';
 import CardDialog from './components/CardDialog.vue';
@@ -72,7 +72,7 @@ function loanCardFor(borrower, currentCardId) {
   return card.id;
 }
 function saveEntry(entry){
-  if(entry.type==='income'&&isOnlineLoanAccount(bankCards.value.find(card=>card.id===entry.card))){toast('Online loan funding uses credit limits, not income.');return}
+  if(entry.type==='income'&&!canRecordIncome(bankCards.value.find(card=>card.id===entry.card),entries.value.find(item=>item.id===entry.id))){toast('Online loan funding uses credit limits, not income.');return}
   if(entry.type==='credit'&&entry.description==='借款'&&entry.borrower){entry={...entry,card:loanCardFor(entry.borrower.trim(),entry.card),borrower:entry.borrower.trim()}}
   const existing=entries.value.findIndex(e=>e.id===entry.id);if(existing>=0)entries.value[existing]=entry;else entries.value.push({...entry,id:Date.now()});month.value=entry.date.slice(0,7);if(recordKind.value!=='all')recordKind.value=entry.type;toast(existing>=0?'Transaction updated':'Transaction saved on this device')
 }

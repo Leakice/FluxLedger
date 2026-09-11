@@ -28,7 +28,7 @@ function removeCard() {
 }
 function save() {
   if (!form.name.trim() || (bankAccount.value && !form.noLast4 && !/^\d{4}$/.test(form.last4))) return;
-  emit('save', { ...form, name: form.name.trim(), ...(bankAccount.value ? {} : { last4: '', noLast4: true, network: accountProvider(form) }) });
+  emit('save', { ...form, accountTypeVersion: 1, name: form.name.trim(), ...(bankAccount.value ? {} : { last4: '', noLast4: true, network: accountProvider(form) }) });
   dialog.value.close();
 }
 defineExpose({ open });

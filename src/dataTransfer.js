@@ -73,6 +73,7 @@ function normalizeCards(value) {
     const normalized = { id, name, last4, network, color };
     if (typeof card.noLast4 === 'boolean') normalized.noLast4 = card.noLast4;
     if (typeof card.accountType === 'string' && card.accountType.trim()) normalized.accountType = card.accountType.trim();
+    if (card.accountTypeVersion === 1) normalized.accountTypeVersion = 1;
     if (typeof card.loanBorrower === 'string' && card.loanBorrower.trim()) normalized.loanBorrower = card.loanBorrower.trim();
     return normalized;
   });

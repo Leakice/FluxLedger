@@ -191,3 +191,64 @@ test('online loan provider presets save without card numbers and explain credit 
     assert.equal(loaded.cards[0].accountType, 'Online loan');
   }
 });
+
+
+test('edited built-in types survive reload and backup restoration, including credit cards', async () => {
+  for (const accountType of ['Alipay', 'Savings card', 'Credit card']) {
+    const { state, events } = await harness('./components/CardDialog.vue');
+    state.open(withBuiltInAccountCards([]).find(card => card.id === 'credit-baitiao'));
+    state.form.accountType = accountType; state.selectAccountType(); state.form.last4 = '1234'; state.save();
+    const saved = events[0][1];
+    const restored = parseDataFile(createDataBackup([], [saved]));
+    for (const cards of [[saved], restored.cards]) {
+      const loaded = withBuiltInAccountCards(cards).find(card => card.id === saved.id);
+      assert.equal(loaded.accountType, accountType);
+      assert.equal(loaded.network, saved.network);
+      assert.equal(loaded.accountTypeVersion, 1);
+    }
+  }
+  const explicit = { id: 'credit-baitiao', name: 'Wallet', accountType: 'Alipay', network: 'Alipay' };
+  assert.equal(withBuiltInAccountCards([explicit])[0].accountType, 'Alipay');
+});
+
+test('legacy loan income can be edited end to end without allowing new loan income', async () => {
+  const previous = Object.fromEntries(['localStorage', 'document', 'ResizeObserver'].map(key => [key, globalThis[key]]));
+  const legacy = { id: 1234, type: 'income', card: 'credit-baitiao', description: 'Legacy income', amount: 100, category: 'Salary', date: '2026-09-10' };
+  const storage = new Map([['cascade-transactions-v1', JSON.stringify([legacy])]]);
+  globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key,value) => storage.set(key,value) };
+  globalThis.document = { documentElement: {}, body: { classList: { toggle() {} } } };
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  const scope = effectScope();
+  try {
+    const { state: app } = await harness('./App.vue', {}, scope);
+    const { state: dialog, events } = await harness('./components/EntryDialog.vue', { cards: app.bankCards.value });
+    dialog.open('income', legacy.date, legacy);
+    assert.ok(dialog.availableCards.value.some(card => card.id === legacy.card));
+    dialog.form.description = 'Corrected'; dialog.form.amount = 120; dialog.save();
+    assert.equal(events.length, 1);
+    app.saveEntry(events[0][1]); await nextTick();
+    assert.equal(app.entries.value[0].description, 'Corrected');
+    assert.equal(app.entries.value[0].amount, 120);
+    assert.equal(app.entries.value[0].card, legacy.card);
+    assert.equal(JSON.parse(storage.get('cascade-transactions-v1'))[0].description, 'Corrected');
+    dialog.form.card = 'credit-huabei'; dialog.save();
+    assert.equal(events.length, 1);
+    app.saveEntry({ ...legacy, card: 'credit-huabei' });
+    assert.equal(app.entries.value[0].card, legacy.card);
+    dialog.open('income', legacy.date);
+    assert.ok(!dialog.availableCards.value.some(card => card.id === legacy.card));
+    Object.assign(dialog.form, { ...legacy, id: null }); dialog.save();
+    assert.equal(events.length, 1);
+    app.saveEntry({ ...legacy, id: 9999 });
+    assert.equal(app.entries.value.length, 1);
+    app.entries.value.push({ ...legacy, id: 1235, type: 'expense' });
+    app.saveEntry({ ...legacy, id: 1235 });
+    assert.equal(app.entries.value[1].type, 'expense');
+    app.toast('');
+  } finally {
+    scope.stop();
+    for (const [key,value] of Object.entries(previous)) {
+      if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+    }
+  }
+});

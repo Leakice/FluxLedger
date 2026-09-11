@@ -56,7 +56,7 @@ test('built-in migration fills missing defaults without overwriting persisted ed
  const normalized=withBuiltInAccountCards([persisted]);
  const card=normalized.find(item=>item.id==='credit-baitiao');
  assert.equal(normalized.filter(item=>item.id==='credit-baitiao').length,1);
- assert.deepEqual(card,{...creditAccountCards[0],...persisted});
+ assert.deepEqual(card,{...creditAccountCards[0],...persisted,accountTypeVersion:1});
  assert.equal(withBuiltInAccountCards([card]).find(item=>item.id===card.id).name,'My credit account');
 });
 

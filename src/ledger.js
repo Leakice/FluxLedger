@@ -3,6 +3,8 @@ export const accountTypes = ['Savings card', 'Credit card', 'Online loan', 'Alip
 export const accountTypeOf = account => account.accountType || 'Savings card';
 export const isBankAccount = account => ['Savings card', 'Credit card'].includes(accountTypeOf(account));
 export const isOnlineLoanAccount = account => !!account && accountTypeOf(account) === 'Online loan';
+export const canRecordIncome = (account, originalEntry) => !isOnlineLoanAccount(account) ||
+  (originalEntry?.type === 'income' && originalEntry.card === account.id);
 export const loanProviders = ['白条', '花呗', '美团月付', '抖音月付', 'Other'];
 export const accountLast4 = account => isBankAccount(account) && !account.noLast4 ? account.last4 || '' : '';
 export const accountProvider = account => isBankAccount(account) || isOnlineLoanAccount(account) ? account.network : accountTypeOf(account);
@@ -70,16 +72,20 @@ export function withBuiltInAccountCards(cards, hiddenCardIds = []) {
     if (builtInCard) claimedBuiltInIds.add(builtInCard.id);
     const normalized = builtInCard ? { ...builtInCard, ...card, id: card.id } : card;
     // These built-in lenders were incorrectly stored as credit cards in v1.
-    // Only change their classification; IDs, amounts and transaction types stay intact.
-    if (builtInCard && isOnlineLoanAccount(builtInCard)) {
-      normalized.accountType = 'Online loan';
-      if (!card.network || card.network === 'Other') normalized.network = builtInCard.network;
+    // Version 1 marks migrated or explicitly saved types so future edits survive reload.
+    // IDs, amounts and transaction types stay intact.
+    if (builtInCard && isOnlineLoanAccount(builtInCard) && card.accountTypeVersion !== 1) {
+      if (!card.accountType || card.accountType === 'Credit card') {
+        normalized.accountType = 'Online loan';
+        if (!card.network || card.network === 'Other') normalized.network = builtInCard.network;
+      }
+      normalized.accountTypeVersion = 1;
     }
     normalizedCards.push(normalized);
   }
 
   for (const builtInCard of visibleBuiltInCards) {
-    if (!claimedBuiltInIds.has(builtInCard.id) && !seenIds.has(builtInCard.id)) normalizedCards.push({ ...builtInCard });
+    if (!claimedBuiltInIds.has(builtInCard.id) && !seenIds.has(builtInCard.id)) normalizedCards.push({ ...builtInCard, ...(isOnlineLoanAccount(builtInCard) ? { accountTypeVersion: 1 } : {}) });
   }
   return normalizedCards;
 }
