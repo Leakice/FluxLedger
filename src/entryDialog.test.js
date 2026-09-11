@@ -93,3 +93,14 @@ test('explicit credit account selection wins over stale description and duplicat
   assert.equal(events[0][1].card, 'custom-huabei');
   assert.equal(events[0][1].type, 'credit');
 });
+
+test('expense credit status follows selected account without a manual toggle',async()=>{
+  const cards=[{id:'loan',accountType:'Online loan',name:'Loan'},{id:'credit',accountType:'Credit card',name:'Credit'},{id:'cash',accountType:'Savings card',name:'Cash'}];
+  const {state,events}=await entryDialogHarness(cards);
+  for(const card of cards){
+    Object.assign(state.form,{type:'expense',card:card.id,amount:20,description:'Purchase',category:'Other',date:'2026-09-11',onCredit:true});
+    state.save();assert.equal(events.at(-1)[1].onCredit,card.id!=='cash');
+  }
+  const source=await readFile(new URL('./components/EntryDialog.vue',import.meta.url),'utf8');
+  assert.doesNotMatch(source,/v-model="form.onCredit"/);
+});

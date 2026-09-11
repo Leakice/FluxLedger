@@ -1,6 +1,6 @@
 import { entryKinds, periodEnd } from './ledger.js';
 
-export const navigationPages = ['Dashboard', 'Transactions'];
+export const navigationPages = ['Dashboard', 'Transactions', 'Repayment records'];
 export const transactionFilters = [
   { type: 'all', label: 'All', action: 'Add transaction', icon: '≡' },
   ...entryKinds,
@@ -18,14 +18,14 @@ export function selectTransactionRows(entries, {
   const query = search.toLowerCase();
   return entries.filter(entry => {
     if (kind !== 'all') {
-      if (entry.type !== kind || !cardIds.includes(entry.card)) return false;
+      if (entry.type !== kind || (!cardIds.includes(entry.card)&&!cardIds.includes(entry.toCard))) return false;
       if (kind === 'credit') {
         if (entry.date > asOf) return false;
       } else {
         if (!entry.date.startsWith(prefix)) return false;
-        if (category !== 'All categories' && (category === 'Income' ? entry.type !== 'income' : entry.category !== category)) return false;
+        if (category !== 'All categories' && (category === 'Income' ? entry.type !== 'income' : (entry.type==='repayment'?entries.find(p=>p.id===entry.purchaseId)?.category:entry.category) !== category)) return false;
       }
     }
-    return (entry.description + ' ' + translate(entry.category) + ' ' + entry.category + ' ' + accountLabel(entry.card)).toLowerCase().includes(query);
-  }).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+    return (entry.description + ' ' + translate(entry.category) + ' ' + entry.category + ' ' + accountLabel(entry.card)+' '+(entry.toCard?accountLabel(entry.toCard):'')).toLowerCase().includes(query);
+  }).sort((a, b) => b.date.localeCompare(a.date) || (Number(b.id)-Number(a.id)||String(b.id).localeCompare(String(a.id))));
 }
