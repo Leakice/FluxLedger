@@ -2,8 +2,9 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
-import { flowChart } from './charts';
-import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome } from './ledger';
+import { flowChart, repaymentChart } from './charts';
+import { bindFlowInteraction } from './flowInteraction';
+import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger, inferCreditExpenses } from './ledger';
 import { navigationPages, transactionFilters, selectTransactionRows } from './transactionView';
 import EntryDialog from './components/EntryDialog.vue';
 import CardDialog from './components/CardDialog.vue';
@@ -13,11 +14,13 @@ const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fa
 const entries=ref(read('cascade-transactions-v1',seed));
 const hiddenBuiltInCardIds=ref(read('fluxledger-hidden-built-in-cards-v1',[]));
 const bankCards=ref(withBuiltInAccountCards(read('fluxledger-cards-v1',defaultCards),hiddenBuiltInCardIds.value));
+entries.value=inferCreditExpenses(entries.value,bankCards.value);
 const entryDialog=ref(null), cardDialog=ref(null), dataDialog=ref(null), recordKind=ref('all');
 const language=ref(localStorage.getItem('cascade-language')||'en');
 const dark=ref(localStorage.getItem('cascade-theme')==='dark');
 const page=ref('Dashboard'), report=ref('Overview'), period=ref('month'), month=ref('2026-09');
 const cards=ref(bankCards.value.map(c=>c.id)), category=ref('All categories'), expanded=ref(false), chartType=ref('Sankey diagram'), search=ref('');
+const formError=ref('');
 const notification=ref(''), deleted=ref(null), filtersOpen=ref(false);
 const asOf=computed(()=>periodEnd(month.value,period.value));
 const cardName=id=>{const card=bankCards.value.find(c=>c.id===id);return card?t(card.name)+(accountLast4(card)?' · '+accountLast4(card):''):id};
@@ -28,8 +31,8 @@ const t=s=>language.value==='zh'?(dictionary[s]||s):s;
 const money=n=>'¥'+Math.abs(n).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const signed=n=>(n>=0?'+ ':'− ')+money(n);
 const dateLabel=(value,short=false)=>new Date(value+'-01T12:00:00').toLocaleDateString(language.value==='zh'?'zh-CN':'en-US',short?{month:'short'}:{month:'long',year:'numeric'});
-const matchesCategory=e=>category.value==='All categories'||(category.value==='Income'?e.type==='income':category.value===e.category);
-const periodEntries=computed(()=>entries.value.filter(e=>e.date.startsWith(period.value==='year'?month.value.slice(0,4):month.value)&&cards.value.includes(e.card)));
+const matchesCategory=e=>category.value==='All categories'||(category.value==='Income'?e.type==='income':category.value===(e.type==='repayment'?entries.value.find(p=>p.id===e.purchaseId)?.category:e.category));
+const periodEntries=computed(()=>entries.value.filter(e=>e.date.startsWith(period.value==='year'?month.value.slice(0,4):month.value)&&(cards.value.includes(e.card)||cards.value.includes(e.toCard))));
 const filtered=computed(()=>periodEntries.value.filter(e=>e.type!=='credit'&&matchesCategory(e)));
 const income=computed(()=>filtered.value.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0));
 const expenses=computed(()=>filtered.value.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0));
@@ -37,7 +40,7 @@ const net=computed(()=>income.value-expenses.value);
 const revenue=computed(()=>report.value==='Income'?income.value:report.value==='Expenses'?expenses.value:net.value);
 const revenueLabel=computed(()=>report.value==='Income'?'Total Income':report.value==='Expenses'?'Total Expenses':period.value==='year'?'Net Yearly Revenue':'Net Monthly Revenue');
 const previousMonth=computed(()=>{const d=new Date(month.value+'-01T12:00:00');d.setMonth(d.getMonth()-1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')});
-const previousRows=computed(()=>entries.value.filter(e=>e.type!=='credit'&&e.date.startsWith(period.value==='year'?String(Number(month.value.slice(0,4))-1):previousMonth.value)&&cards.value.includes(e.card)&&matchesCategory(e)));
+const previousRows=computed(()=>entries.value.filter(e=>e.type!=='credit'&&e.date.startsWith(period.value==='year'?String(Number(month.value.slice(0,4))-1):previousMonth.value)&&(cards.value.includes(e.card)||cards.value.includes(e.toCard))&&matchesCategory(e)));
 const previousIncome=computed(()=>previousRows.value.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0));
 const previousExpenses=computed(()=>previousRows.value.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0));
 const growth=computed(()=>{const prev=previousIncome.value-previousExpenses.value;return prev?`${net.value>=prev?'↗':'↘'} ${Math.abs(Math.round((net.value-prev)/Math.abs(prev)*100))}%`:'—'});
@@ -46,15 +49,36 @@ const previousLabel=computed(()=>period.value==='year'?String(Number(month.value
 const sources=computed(()=>{const totals={};filtered.value.filter(e=>e.type===(report.value==='Income'?'income':'expense')).forEach(e=>totals[e.category]=(totals[e.category]||0)+e.amount);return Object.entries(totals).sort((a,b)=>b[1]-a[1])});
 const percent=i=>{const total=sources.value.reduce((s,e)=>s+e[1],0);return total?Math.round((sources.value[i]?.[1]||0)/total*100):0};
 const donutStyle=computed(()=>({background:`conic-gradient(#ff852b 0 ${percent(0)}%,var(--panel) ${percent(0)}% ${Math.min(100,percent(0)+1)}%,#e6e9ea ${Math.min(100,percent(0)+1)}% 100%)`}));
-const flowModel=computed(()=>buildFlowModel(periodEntries.value,entries.value,bankCards.value.filter(c=>cards.value.includes(c.id)),asOf.value,category.value));
+const flowModel=computed(()=>buildFlowModel(periodEntries.value,entries.value,bankCards.value.filter(c=>cards.value.includes(c.id)),asOf.value,category.value,bankCards.value));
+const repaymentMonth=ref('2026-09');
+const repaymentModel=computed(()=>buildFlowModel(entries.value.filter(e=>e.date.startsWith(repaymentMonth.value)),entries.value,bankCards.value,periodEnd(repaymentMonth.value,'month'),'All categories',bankCards.value));
+const repaymentFlow=computed(()=>repaymentChart(repaymentModel.value,t));
+const repaymentBalances=computed(()=>accountBalances(entries.value,bankCards.value,periodEnd(repaymentMonth.value,'month')));
+const repaymentRows=computed(()=>entries.value.filter(e=>e.type==='repayment'&&e.date.startsWith(repaymentMonth.value)).sort((a,b)=>b.date.localeCompare(a.date)));
+const balances=computed(()=>accountBalances(entries.value,bankCards.value,asOf.value));
+const purchases=computed(()=>creditPurchases(entries.value,asOf.value));
+const purchaseFor=id=>purchases.value.find(p=>p.id===id);
 const flowContainer=ref(null), flowWidth=ref(960);
-const flowObserver=new ResizeObserver(([entry])=>{flowWidth.value=entry.contentRect.width});
+let flowResizeFrame = null;
+const flowObserver=new ResizeObserver(([entry])=>{
+  if(flowResizeFrame!==null)cancelAnimationFrame(flowResizeFrame);
+  flowResizeFrame=requestAnimationFrame(()=>{flowWidth.value=Math.floor(entry.contentRect.width)});
+});
 watch(flowContainer,element=>{flowObserver.disconnect();if(element)flowObserver.observe(element)},{flush:'post'});
-onBeforeUnmount(()=>flowObserver.disconnect());
+onBeforeUnmount(()=>{flowObserver.disconnect();if(flowResizeFrame!==null)cancelAnimationFrame(flowResizeFrame);disposeFlow()});
 const flow=computed(()=>flowChart(flowModel.value,chartType.value,t,flowWidth.value));
+let disposeFlow=()=>{};
+watch([flowContainer,flow],()=>{
+  disposeFlow();
+  disposeFlow=bindFlowInteraction(flowContainer.value,t);
+},{flush:'post'});
+watch([flowModel,chartType,language],()=>{
+  if(flowContainer.value && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    flowContainer.value.querySelector('.sankey-chart')?.animate([{opacity:.5},{opacity:1}],{duration:260,easing:'ease-out'});
+},{flush:'post'});
 const rows=computed(()=>selectTransactionRows(entries.value,{kind:recordKind.value,month:month.value,period:period.value,cardIds:cards.value,category:category.value,search:search.value,translate:t,accountLabel:cardName}));
 const activeRecordFilter=computed(()=>transactionFilters.find(kind=>kind.type===recordKind.value));
-const months=computed(()=>Array.from({length:6},(_,i)=>{const d=new Date(month.value+'-01T12:00:00');d.setMonth(d.getMonth()-5+i);const prefix=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const data=entries.value.filter(e=>e.type!=='credit'&&e.date.startsWith(prefix)&&cards.value.includes(e.card)&&matchesCategory(e));return{label:dateLabel(prefix,true),income:data.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0),expense:data.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0),count:data.length}}));
+const months=computed(()=>Array.from({length:6},(_,i)=>{const d=new Date(month.value+'-01T12:00:00');d.setMonth(d.getMonth()-5+i);const prefix=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const data=entries.value.filter(e=>e.type!=='credit'&&e.date.startsWith(prefix)&&(cards.value.includes(e.card)||cards.value.includes(e.toCard))&&matchesCategory(e));return{label:dateLabel(prefix,true),income:data.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0),expense:data.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0),count:data.length}}));
 const chartMax=computed(()=>Math.max(...months.value.map(e=>Math.max(e.income,e.expense)),1000)*1.12);
 const linePoints=computed(()=>months.value.map((e,i)=>`${65+i*64},${176-e.expense/chartMax.value*145}`).join(' '));
 const frequencyPoints=computed(()=>{const max=Math.max(...months.value.map(e=>e.count),1);return months.value.map((e,i)=>`${i*72},${72-e.count/max*48}`).join(' ')});
@@ -63,7 +87,8 @@ function toast(message){notification.value=message;clearTimeout(toastTimer);toas
 function navigate(next){page.value=navigationPages.includes(next)?next:'Dashboard';if(page.value==='Dashboard')report.value='Overview'}
 function selectRecordKind(kind){recordKind.value=kind;category.value='All categories'}
 function reset(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';toast('Filters reset')}
-function openForm(type='expense',entry=null){entryDialog.value.open(type==='all'?'expense':type,month.value+'-10',entry)}
+function openForm(type='expense',entry=null){formError.value='';entryDialog.value.open(type==='all'?'expense':type,(page.value==='Repayment records'?repaymentMonth.value:month.value)+'-10',entry)}
+function openRepayment(entry){openForm('repayment',{id:null,description:'Repayment · '+entry.description,purchaseId:entry.id,toCard:entry.card,card:bankCards.value.find(c=>c.id!==entry.card)?.id||'',amount:purchaseFor(entry.id)?.due||'',date:asOf.value < entry.date ? entry.date : month.value+'-'+String(Math.max(10,entry.date.startsWith(month.value)?Number(entry.date.slice(-2)):1)).padStart(2,'0')})}
 function loanCardFor(borrower, currentCardId) {
   const existing = findLoanCard(bankCards.value, borrower, currentCardId);
   if (existing) return existing.id;
@@ -74,7 +99,9 @@ function loanCardFor(borrower, currentCardId) {
 function saveEntry(entry){
   if(entry.type==='income'&&!canRecordIncome(bankCards.value.find(card=>card.id===entry.card),entries.value.find(item=>item.id===entry.id))){toast('Online loan funding uses credit limits, not income.');return}
   if(entry.type==='credit'&&entry.description==='借款'&&entry.borrower){entry={...entry,card:loanCardFor(entry.borrower.trim(),entry.card),borrower:entry.borrower.trim()}}
-  const existing=entries.value.findIndex(e=>e.id===entry.id);if(existing>=0)entries.value[existing]=entry;else entries.value.push({...entry,id:Date.now()});month.value=entry.date.slice(0,7);if(recordKind.value!=='all')recordKind.value=entry.type;toast(existing>=0?'Transaction updated':'Transaction saved on this device')
+  const existing=entries.value.some(e=>e.id===entry.id);
+  try{entries.value=saveTransaction(entries.value,{...entry,id:entry.id??crypto.randomUUID()},bankCards.value)}catch(error){formError.value=error.message;return;}
+  entryDialog.value.close();if(entry.type==='repayment')repaymentMonth.value=entry.date.slice(0,7);month.value=entry.date.slice(0,7);if(recordKind.value!=='all')recordKind.value=entry.type;toast(existing?'Transaction updated':'Transaction saved on this device');
 }
 function saveCard(card){
   const isNew = !card.id;
@@ -84,14 +111,14 @@ function saveCard(card){
   if(isNew&&isOnlineLoanAccount(card))entryDialog.value.open('credit',month.value+'-10',{card:card.id,description:card.name});
 }
 function removeCard(id){
-  if(entries.value.some(entry=>entry.card===id)){toast('Delete linked entries first');return}
+  if(entries.value.some(entry=>entry.card===id||entry.toCard===id)){toast('Delete linked entries first');return}
   bankCards.value=bankCards.value.filter(card=>card.id!==id);cards.value=cards.value.filter(cardId=>cardId!==id);
   if(isBuiltInAccountCard(id)&&!hiddenBuiltInCardIds.value.includes(id))hiddenBuiltInCardIds.value.push(id);
   toast('Account deleted');
 }
-function remove(entry){deleted.value=entry;entries.value=entries.value.filter(e=>e.id!==entry.id);toast('Transaction deleted')}
-function undo(){if(deleted.value){entries.value.push(deleted.value);deleted.value=null;notification.value=''}}
-function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.value=payload.hiddenBuiltInCardIds||[];bankCards.value=withBuiltInAccountCards(payload.cards,hiddenBuiltInCardIds.value);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='all';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
+function remove(entry){const next=entries.value.filter(e=>e.id!==entry.id);const error=validateLedger(next,bankCards.value);if(error){toast(error);return;}deleted.value=entry;entries.value=next;toast('Transaction deleted')}
+function undo(){if(deleted.value){try{entries.value=saveTransaction(entries.value,deleted.value,bankCards.value);deleted.value=null;notification.value=''}catch(error){toast(error.message)}}}
+function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.value=payload.hiddenBuiltInCardIds||[];bankCards.value=withBuiltInAccountCards(payload.cards,hiddenBuiltInCardIds.value);entries.value=inferCreditExpenses(entries.value,bankCards.value);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='all';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
 watch(bankCards,value=>localStorage.setItem('fluxledger-cards-v1',JSON.stringify(value)),{deep:true});
 watch(hiddenBuiltInCardIds,value=>localStorage.setItem('fluxledger-hidden-built-in-cards-v1',JSON.stringify(value)),{deep:true});
 watch(entries,value=>localStorage.setItem('cascade-transactions-v1',JSON.stringify(value)),{deep:true});
@@ -131,6 +158,12 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
         </div>
       </section>
     </section>
+    <section v-else-if="page==='Repayment records'" id="repayment-records">
+      <div class="section-heading"><h1>{{ t('Repayment records') }}</h1><div class="tools"><input type="month" :value="repaymentMonth" @change="repaymentMonth=$event.target.value||repaymentMonth" :aria-label="t('Select period')"><button class="primary" @click="openForm('repayment')">{{ t('Repay credit') }}</button></div></div>
+      <div class="repayment-chart" v-html="repaymentFlow"/>
+        <section class="account-balances"><article v-for="account in repaymentBalances" :key="account.id"><strong>{{ cardName(account.id) }}</strong><span>{{ t('Recorded cash balance') }} {{ signed(account.cash) }}</span><span>{{ t('Outstanding credit') }} {{ money(account.debt) }}</span></article></section>
+      <div class="table-wrap" v-if="repaymentRows.length"><table><thead><tr><th>{{ t('Date') }}</th><th>{{ t('Description') }}</th><th>{{ t('Account') }}</th><th>{{ t('Amount') }}</th><th>{{ t('Actions') }}</th></tr></thead><tbody><tr v-for="entry in repaymentRows" :key="entry.id"><td>{{ entry.date }}</td><td>{{ entry.description }}</td><td>{{ cardName(entry.card) }} → {{ cardName(entry.toCard) }}</td><td>{{ money(entry.amount) }}</td><td><button @click="openForm('repayment',entry)">{{ t('Edit') }}</button><button @click="remove(entry)">{{ t('Delete') }}</button></td></tr></tbody></table></div>
+    </section>
     <section v-else id="transactions">
       <div class="section-heading"><div><span class="eyebrow">{{ t('YOUR EVERYDAY MONEY') }}</span><h1>{{ t('Transactions') }}</h1></div><button class="data-manager-trigger" :title="t('Data management')" :aria-label="t('Data management')" @click="dataDialog.open()"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/></svg><span>{{ t('Data management') }}</span></button></div>
       <div class="entry-portals">
@@ -142,23 +175,23 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
       <div v-if="recordKind==='credit'" class="credit-explanation"><span>◇</span>{{ t('The latest limit replaces the previous limit. It is not income.') }}<span class="muted">{{ t('As of') }} {{ asOf }}</span></div>
       <div class="list-toolbar"><input v-model="search" type="search" :placeholder="t('Search transactions…')"><span>{{ t(activeRecordFilter.label) }} · {{ rows.length }} {{ language==='zh'?'笔记录':'records' }}</span></div>
       <div class="table-wrap desktop-transactions"><table><thead><tr><th v-for="item in ['Description','Type','Category','Date','Account','Amount','Actions']" :key="item">{{ t(item) }}</th></tr></thead>
-        <TransitionGroup name="row" tag="tbody"><tr v-for="entry in rows" :key="entry.id"><td>{{ entry.id<300||entry.type==='credit'?t(entry.description):entry.description }}</td><td><span class="type-badge" :class="entry.type">{{ t(entryKinds.find(k=>k.type===entry.type)?.label) }}</span></td><td>{{ t(entry.category) }}</td><td>{{ entry.date }}</td><td>{{ cardName(entry.card) }}</td><td :class="entry.type">{{ entry.type==='credit'?'':entry.type==='income'?'+':'−' }}{{ money(entry.amount) }}</td><td><div class="row-actions"><button class="row-edit" :aria-label="t('Edit transaction')+' '+entry.description" @click="openForm(entry.type,entry)">✎ {{ t('Edit') }}</button><button class="row-delete" :aria-label="t('Delete transaction')+' '+entry.description" @click="remove(entry)">×</button></div></td></tr></TransitionGroup>
+        <TransitionGroup name="row" tag="tbody"><tr v-for="entry in rows" :key="entry.id"><td>{{ entry.id<300||entry.type==='credit'?t(entry.description):entry.description }}<small v-if="entry.onCredit&&purchaseFor(entry.id)" class="entry-detail">{{ t(purchaseFor(entry.id).status) }} · {{ t('Amount due') }} {{ money(purchaseFor(entry.id).due) }}</small></td><td><span class="type-badge" :class="entry.type">{{ t(entry.onCredit?'Credit purchase':entryKinds.find(k=>k.type===entry.type)?.label) }}</span></td><td>{{ t(entry.category) }}</td><td>{{ entry.date }}</td><td>{{ cardName(entry.card) }}<template v-if="entry.type==='repayment'"> → {{ cardName(entry.toCard) }}<small class="entry-detail">{{ t('Linked credit purchase') }}: {{ entries.find(p=>p.id===entry.purchaseId)?.description }}</small></template></td><td :class="entry.type">{{ entry.type==='credit'?'':entry.type==='income'?'+':'−' }}{{ money(entry.amount) }}</td><td><div class="row-actions"><button v-if="entry.onCredit&&purchaseFor(entry.id)?.due>0" class="row-edit" @click="openRepayment(entry)">{{ t('Repay credit') }}</button><button class="row-edit" :aria-label="t('Edit transaction')+' '+entry.description" @click="openForm(entry.type,entry)">✎ {{ t('Edit') }}</button><button class="row-delete" :aria-label="t('Delete transaction')+' '+entry.description" @click="remove(entry)">×</button></div></td></tr></TransitionGroup>
         <tbody v-if="!rows.length"><tr><td colspan="7" class="empty-state">{{ t('No transactions found.') }}<button class="text-button empty-add" @click="openForm(recordKind)">＋ {{ t(activeRecordFilter.action) }}</button></td></tr></tbody>
       </table></div>
       <TransitionGroup name="row" tag="ul" class="mobile-transactions" :aria-label="t('Transactions')">
         <li v-for="entry in rows" :key="entry.id" class="transaction-card">
-          <div class="transaction-card-heading"><span class="type-badge" :class="entry.type">{{ t(entryKinds.find(k=>k.type===entry.type)?.label) }}</span><time :datetime="entry.date">{{ entry.date }}</time></div>
-          <h3>{{ entry.id<300||entry.type==='credit'?t(entry.description):entry.description }}</h3>
+          <div class="transaction-card-heading"><span class="type-badge" :class="entry.type">{{ t(entry.onCredit?'Credit purchase':entryKinds.find(k=>k.type===entry.type)?.label) }}</span><time :datetime="entry.date">{{ entry.date }}</time></div>
+          <h3>{{ entry.id<300||entry.type==='credit'?t(entry.description):entry.description }}</h3><small v-if="entry.onCredit&&purchaseFor(entry.id)" class="entry-detail">{{ t(purchaseFor(entry.id).status) }} · {{ t('Amount due') }} {{ money(purchaseFor(entry.id).due) }}</small>
           <strong class="transaction-amount" :class="entry.type">{{ entry.type==='credit'?'':entry.type==='income'?'+':'−' }}{{ money(entry.amount) }}</strong>
-          <dl><div><dt>{{ t('Category') }}</dt><dd>{{ t(entry.category) }}</dd></div><div><dt>{{ t('Account') }}</dt><dd>{{ cardName(entry.card) }}</dd></div></dl>
-          <div class="row-actions"><button class="row-edit" :aria-label="t('Edit transaction')+' '+entry.description" @click="openForm(entry.type,entry)">✎ {{ t('Edit') }}</button><button class="row-delete" :aria-label="t('Delete transaction')+' '+entry.description" @click="remove(entry)">× {{ t('Delete') }}</button></div>
+          <dl><div><dt>{{ t('Category') }}</dt><dd>{{ t(entry.category) }}</dd></div><div><dt>{{ t('Account') }}</dt><dd>{{ cardName(entry.card) }}<template v-if="entry.type==='repayment'"> → {{ cardName(entry.toCard) }}<small class="entry-detail">{{ t('Linked credit purchase') }}: {{ entries.find(p=>p.id===entry.purchaseId)?.description }}</small></template></dd></div></dl>
+          <div class="row-actions"><button v-if="entry.onCredit&&purchaseFor(entry.id)?.due>0" class="row-edit" @click="openRepayment(entry)">{{ t('Repay credit') }}</button><button class="row-edit" :aria-label="t('Edit transaction')+' '+entry.description" @click="openForm(entry.type,entry)">✎ {{ t('Edit') }}</button><button class="row-delete" :aria-label="t('Delete transaction')+' '+entry.description" @click="remove(entry)">× {{ t('Delete') }}</button></div>
         </li>
       </TransitionGroup>
       <div v-if="!rows.length" class="mobile-empty empty-state">{{ t('No transactions found.') }}<button class="text-button empty-add" @click="openForm(recordKind)">＋ {{ t(activeRecordFilter.action) }}</button></div>
     </section>
   </main>
   <footer><img class="footer-brand" src="/assets/logo-mini.svg" alt="QYNT" width="105" height="119"/><span>{{ t('A clear view of your financial world.') }}</span><a class="footer-contact" href="mailto:leakice@qq.com,2632364603@qq.com">{{ t('Contact us') }}</a></footer>
-  <EntryDialog ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
+  <EntryDialog :entries="entries" :error="formError" ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
   <CardDialog ref="cardDialog" :t="t" @save="saveCard" @remove="removeCard"/>
   <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :t="t" @import="importData" @notify="toast"/>
   <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button></div>
