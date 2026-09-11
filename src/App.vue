@@ -157,7 +157,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
       <div v-if="!rows.length" class="mobile-empty empty-state">{{ t('No transactions found.') }}<button class="text-button empty-add" @click="openForm(recordKind)">＋ {{ t(activeRecordFilter.action) }}</button></div>
     </section>
   </main>
-  <footer><span class="footer-brand">cascade<span>®</span></span><span>{{ t('A clear view of your financial world.') }}</span><span>{{ t('Local workspace') }} <i class="live-dot"/></span></footer>
+  <footer><img class="footer-brand" src="/assets/logo-mini.svg" alt="QYNT" width="105" height="119"/><span>{{ t('A clear view of your financial world.') }}</span><a class="footer-contact" href="mailto:leakice@qq.com,2632364603@qq.com">{{ t('Contact us') }}</a></footer>
   <EntryDialog ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
   <CardDialog ref="cardDialog" :t="t" @save="saveCard" @remove="removeCard"/>
   <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :t="t" @import="importData" @notify="toast"/>
