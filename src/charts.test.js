@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { flowChart, ribbon } from './charts.js';
+import { flowChart, ribbon, flowSlots } from './charts.js';
 const t = x => x;
 const model = {income:100,credit:0,capacity:100,spent:50,cards:[
 {id:'a',name:'Same <name>',color:'#498cff',income:60,credit:0,capacity:60,spent:30,expenses:[{category:'Food',amount:30}]},
@@ -27,4 +27,26 @@ test('no funding and no selected accounts remain renderable', () => {
   const zero={...model,income:0,capacity:0,cards:model.cards.map(c=>({...c,income:0,capacity:0}))};
   assert.doesNotMatch(flowChart(zero,'Sankey diagram',t,320),/NaN|Infinity/);
   assert.match(flowChart({...zero,cards:[]},'Sankey diagram',t,320),/chart-empty/);
+});
+
+test('tiny streams remain proportional and centered inside minimum nodes',()=>{
+  const slots=flowSlots([.01,100],350,2);
+  assert.equal(slots[0].h,4);
+  assert.equal(slots[0].offset,1.99);
+  assert.equal(slots[1].h,200);
+  assert.equal(slots[1].offset,0);
+});
+test('attached ribbons overlap nodes and retain equal thickness at both ends',()=>{
+  for(const width of [240,320,960]){
+    const svg=flowChart(model,'Sankey diagram',t,width);
+    assert.doesNotMatch(svg,/label-box/);
+    const paths=[...svg.matchAll(/<path class="flow-ribbon" d="([^"]+)"[^>]*data-value="([^"]+)"/g)];
+    for(const [,d,value] of paths){
+      const numbers=[...d.matchAll(/-?\d+(?:\.\d+)?/g)].map(m=>Number(m[0]));
+      const topSource=numbers[1],topTarget=numbers[11],bottomTarget=numbers[23],bottomSource=numbers[31];
+      assert.ok(Math.abs((bottomTarget-topTarget)-(bottomSource-topSource))<1e-8);
+      assert.ok(Number(value)>0);
+    }
+    assert.ok(paths.length>0);
+  }
 });

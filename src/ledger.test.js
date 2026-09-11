@@ -92,7 +92,7 @@ test('SVG escapes card names and never fabricates another income source',()=>{
  assert.ok(!/NaN|Infinity/.test(empty));
 });
 
-test('narrow Sankey keeps all three columns and wrapped labels inside colored nodes',()=>{
+test('Sankey preserves rounded colored nodes with names, amounts and percentages inside',()=>{
  const model=buildFlowModel(entries,entries,[{...cards[0],name:'银行卡很长的名称 <script> & extra description',last4:'9999'}],'2026-09-30');
  for(const width of [280,343,600,900]){
   const svg=flowChart(model,'Sankey diagram',s=>s,width);
@@ -115,7 +115,7 @@ test('narrow Sankey keeps all three columns and wrapped labels inside colored no
   }
   assert.equal(columns.size,3);
   const positions=[...columns].sort((a,b)=>a-b);
-  assert.ok(Math.abs(positions[1]+Math.min(150,width*.27)/2-width/2)<.01);
+  assert.ok(Math.abs(positions[1]+Math.min(150,width*.23)/2-width/2)<.01);
  }
 });
 
