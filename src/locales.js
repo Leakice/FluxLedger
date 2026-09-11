@@ -13,7 +13,7 @@
     'Monthly Balance':'月度余额','Balance':'余额','Total':'合计','Online purchase':'线上消费',
     'In-store shopping':'线下消费','September':'九月','August':'八月','Apr':'4月','May':'5月',
     'Jun':'6月','Jul':'7月','Aug':'8月','Sep':'9月','Jan':'1月','Feb':'2月','Mar':'3月','Oct':'10月','Nov':'11月','Dec':'12月',
-    'A clear view of your financial world.':'每一笔收支，都清清楚楚。','Local workspace':'本地工作区',
+    'A clear view of your financial world.':'每一笔收支，都清清楚楚。','Contact us':'联系我们',
     'YOUR EVERYDAY MONEY':'记录日常的每一笔',
     '＋ Add transaction':'＋ 新增交易','Add transaction':'新增交易','Description':'交易说明','Category':'分类',
     'Date':'日期','Card':'银行卡','Amount':'金额','Amount (¥)':'金额（人民币）','Type':'类型','Expense':'支出',
