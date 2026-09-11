@@ -1,0 +1,94 @@
+/* Report surfaces and motion stay scoped to the financial report. */
+.reports {
+  --muted: #606c75;
+  --line: #dce3e8;
+  --report-accent: #1769d2;
+  --report-bar: #8ebee5;
+  --report-trend: #147b87;
+  --report-ring: #b8c4cd;
+  --report-edge: #ffffffb3;
+  --report-hover: #1769d20a;
+}
+.dark .reports {
+  --muted: #b0bec8;
+  --line: #46525b;
+  --report-accent: #68aaff;
+  --report-bar: #497ba4;
+  --report-trend: #65d0d8;
+  --report-ring: #596975;
+  --report-edge: #ffffff0f;
+  --report-hover: #68aaff12;
+}
+.reports .report-heading h2 { color: var(--ink); font-weight: 500; }
+.reports .report-date { font-size: 10px; }
+.reports .segmented { background: var(--report-hover); box-shadow: inset 0 1px 3px #172a3608; }
+.reports .segmented button { color: var(--muted); font-weight: 600; position: relative; }
+.reports .segmented button.active { color: var(--report-accent); box-shadow: 0 2px 7px #172a3614, inset 0 0 0 1px var(--report-edge); }
+.reports .segmented button::after { content: ''; position: absolute; bottom: 6px; left: calc(50% - 7px); width: 14px; height: 2px; border-radius: 2px; background: var(--report-accent); transform: scaleX(0); transition: transform 220ms ease; }
+.reports .segmented button.active::after { transform: scaleX(1); }
+.reports article { border: 1px solid var(--report-edge); box-shadow: 0 3px 12px #172a3608; transition: box-shadow 220ms ease, border-color 220ms ease; animation: report-reveal 360ms ease-out both; }
+.reports .frequency { animation-delay: 35ms; }
+.reports .sources { animation-delay: 55ms; }
+.reports .balance { animation-delay: 80ms; }
+.reports h3 { font-weight: 600; }
+.reports .revenue strong, .reports .stat-row b, .reports .donut strong { font-variant-numeric: tabular-nums; }
+.reports .growth { background: #087c56; }
+.reports .stat-row { font-size: 12px; line-height: 1.5; transition: background-color 180ms ease; }
+.reports .stat-row b { font-weight: 500; }
+.reports .circle-decoration { color: var(--muted); }
+.reports .legend { display: flex; flex-wrap: wrap; font-size: 11px; line-height: 1.5; }
+.reports .legend i { width: 7px; height: 7px; background: var(--report-accent); }
+.reports .legend i:nth-of-type(2) { background: var(--report-trend); width: 14px; height: 3px; border-radius: 2px; }
+.reports .balance .card-heading { flex-wrap: wrap; }
+.reports .donut { box-shadow: inset 0 0 0 1px #172a3608, 0 5px 14px #172a3608; animation: report-ring-in 500ms ease-out both; transition: box-shadow 220ms ease; }
+.reports .donut > div { box-shadow: 0 1px 8px #172a3610; }
+.reports .donut-label { font-size: 12px; box-shadow: 0 3px 8px #172a3618; }
+.reports .report-line { stroke-dasharray: 1; stroke-dashoffset: 0; animation: report-line-in 650ms ease-out both; }
+.reports .balance-bar { transform-box: fill-box; transform-origin: center bottom; animation: report-bar-in 450ms ease-out both; animation-delay: var(--bar-delay, 0ms); transition: filter 180ms ease; }
+.reports .balance-month.is-current > text { fill: var(--report-accent); font-weight: 700; }
+@media (hover: hover) {
+  .reports article:hover { border-color: var(--line); box-shadow: 0 7px 20px #172a3610; }
+  .reports .segmented button:hover { background: var(--panel); transform: none; color: var(--report-accent); }
+  .reports .stat-row:hover { background: var(--report-hover); }
+  .reports .donut:hover { box-shadow: 0 5px 18px #172a3620; }
+  .reports .balance-month:hover .balance-bar { filter: brightness(1.12); }
+}
+@keyframes report-reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes report-line-in { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes report-bar-in { from { transform: scaleY(.08); } to { transform: scaleY(1); } }
+@keyframes report-ring-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .reports *, .reports *::after { animation: none !important; transition: none !important; }
+  .reports button:active { transform: none; }
+}
+/* Balanced row padding keeps hover surfaces centered around their labels. */
+.reports .stat-row { padding: 12px 8px; margin-top: 0; min-height: 44px; }
+.reports .stat-row:first-of-type { margin-top: 10px; }
+.reports .source-link { transition: color 180ms ease, background-color 180ms ease, box-shadow 180ms ease; }
+.reports .source-link:hover { color: var(--report-accent); background: var(--report-hover); box-shadow: 0 2px 8px #172a3610; }
+.reports .source-ring-wrap { width: min(100%, 240px); aspect-ratio: 1; margin: 12px auto; position: relative; }
+.reports .source-ring { width: 100%; height: 100%; display: block; overflow: visible; }
+.reports .source-slice { pointer-events: stroke; cursor: pointer; transition: stroke-width 200ms ease, opacity 200ms ease, filter 200ms ease; }
+.reports .source-slice.is-active { filter: drop-shadow(0 2px 3px #172a3620); }
+.reports .source-slice.is-muted { opacity: .5; }
+.reports .source-slice:focus-visible { outline: none; stroke-width: 50; filter: drop-shadow(0 0 2px var(--ink)); }
+.reports .source-center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; pointer-events: none; gap: 4px; }
+.reports .source-center strong { font-size: 29px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.reports .source-tooltip { position: absolute; transform: translate(-50%, -50%); z-index: 1; pointer-events: none; background: #17212b; color: #fff; border-radius: 9px; padding: 7px 10px; box-shadow: 0 4px 12px #172a3626; font-size: 11px; display: grid; gap: 4px; white-space: nowrap; animation: report-tooltip-in 160ms ease-out; }
+.reports .source-tooltip b { font-weight: 500; }
+.reports .source-row { display: flex; width: 100%; text-align: left; border-radius: 0; }
+.reports .source-row > span { display: flex; align-items: center; gap: 8px; }
+.reports .source-row i { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.reports .source-row.is-active { background: var(--report-hover); }
+.reports .source-row:active { transform: none; }
+.reports #frequency-chart { height: 110px; margin: 12px 0 0; overflow: visible; }
+.reports .frequency-line { transition: stroke-width 180ms ease; }
+.reports .frequency-line.is-active { stroke-width: 3.5; }
+.reports .frequency-point circle { transition: r 180ms ease; }
+.reports .frequency-point rect[tabindex] { cursor: crosshair; }
+.reports .frequency-tooltip rect { fill: #17212b; }
+.reports .frequency-tooltip text { fill: white; font-size: 11px; }
+@keyframes report-tooltip-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .reports .source-slice, .reports .source-tooltip, .reports .frequency-line, .reports .frequency-point circle, .reports .source-link { animation: none; transition: none; }
+}
