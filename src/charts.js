@@ -1,9 +1,22 @@
 import { accountLast4 } from './ledger.js';
 const money = n => '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function ribbon(x1,y1,h1,x2,y2,h2,color) {
-  const curve=(x2-x1)*.48;
-  return '<path class="flow-ribbon" d="M'+x1+','+y1+' C'+(x1+curve)+','+y1+' '+(x2-curve)+','+y2+' '+x2+','+y2+' L'+x2+','+(y2+h2)+' C'+(x2-curve)+','+(y2+h2)+' '+(x1+curve)+','+(y1+h1)+' '+x1+','+(y1+h1)+'Z" fill="'+color+'"/>';
+function details(meta) {
+  if (!meta) return '';
+  return ' tabindex="0" data-flow-id="'+escapeHtml(meta.id)+'" data-source="'+escapeHtml(meta.source || '')+'" data-target="'+escapeHtml(meta.target || '')+'" data-title="'+escapeHtml(meta.title)+'" data-value="'+meta.value+'" data-total="'+meta.total+'" aria-label="'+escapeHtml(meta.title+': '+money(meta.value))+'"';
+}
+function interactiveNode(html,id,title,value,total) {
+  return '<g class="flow-interactive-node"'+details({id,title,value,total})+'>'+html+'</g>';
+}
+export function ribbon(x1,y1,h1,x2,y2,h2,color,meta) {
+  const curve=(x2-x1)*.5, r=Math.min(h1/2,h2/2,10,Math.max(0,(x2-x1)/4));
+  const d='M'+x1+','+(y1+r)+' Q'+x1+','+y1+' '+(x1+r)+','+y1+
+    ' C'+(x1+curve)+','+y1+' '+(x2-curve)+','+y2+' '+(x2-r)+','+y2+
+    ' Q'+x2+','+y2+' '+x2+','+(y2+r)+' L'+x2+','+(y2+h2-r)+
+    ' Q'+x2+','+(y2+h2)+' '+(x2-r)+','+(y2+h2)+
+    ' C'+(x2-curve)+','+(y2+h2)+' '+(x1+curve)+','+(y1+h1)+' '+(x1+r)+','+(y1+h1)+
+    ' Q'+x1+','+(y1+h1)+' '+x1+','+(y1+h1-r)+' Z';
+  return '<path class="flow-ribbon" d="'+d+'" fill="'+color+'"'+details(meta)+'/>';
 }
 function label(x,y,name,value) {
   return '<g class="flow-label"><rect class="label-box" x="'+x+'" y="'+y+'" width="125" height="37" rx="7" fill="var(--panel)" fill-opacity=".94"/><text x="'+(x+8)+'" y="'+(y+13)+'" font-size="10" fill="var(--muted)">'+escapeHtml(name)+'</text><text x="'+(x+8)+'" y="'+(y+29)+'" font-size="12" fill="var(--ink)">'+money(value)+'</text></g>';
@@ -69,7 +82,7 @@ function capacityChart(model,chartType,t,width=960) {
       if(!value)return;
       const sh=ss[j].h*value/([income,credit][j]||1);
       const ch=cs[i].h*value/(card.capacity||1);
-      paths+=ribbon(xs[0]+nodeWidth,ss[j].y+sourceUsed[j],sh,xs[1],cs[i].y+cardUsed[i],ch,j?'url(#credit-flow)':'url(#income-flow)');
+      paths+=ribbon(xs[0]+nodeWidth,ss[j].y+sourceUsed[j],sh,xs[1],cs[i].y+cardUsed[i],ch,j?'url(#credit-flow)':'url(#income-flow)',{id:'in:'+i+':'+j,source:'source:'+j,target:'account:'+card.id,title:t(j?'Credit limit':'Income')+' → '+t(card.name),value,total:capacity});
       sourceUsed[j]+=sh;cardUsed[i]+=ch;
     });
   });
@@ -81,14 +94,14 @@ function capacityChart(model,chartType,t,width=960) {
       if(!funded)return;
       const ch=cs[i].h*funded/(card.capacity||1);
       const th=ts[j].h*funded/(target.value||1);
-      paths+=ribbon(xs[1]+nodeWidth,cs[i].y+used,ch,xs[2],ts[j].y+targetUsed[j],th,'url(#expense-flow)');
+      paths+=ribbon(xs[1]+nodeWidth,cs[i].y+used,ch,xs[2],ts[j].y+targetUsed[j],th,'url(#expense-flow)',{id:'out:'+i+':'+j,source:'account:'+card.id,target:'target:'+j,title:t(card.name)+' → '+t(target.name),value:funded,total:capacity});
       used+=ch;targetUsed[j]+=th;
     });
   });
   return '<svg class="sankey-chart" viewBox="0 0 '+canvasWidth+' '+height+'" role="img" aria-label="'+escapeHtml(t('Income and credit limit flow through accounts to expenses'))+'"><defs><linearGradient id="income-flow"><stop stop-color="#8a5cf6" stop-opacity=".55"/><stop offset="1" stop-color="#5997fa" stop-opacity=".26"/></linearGradient><linearGradient id="credit-flow"><stop stop-color="#627084" stop-opacity=".45"/><stop offset="1" stop-color="#5189d6" stop-opacity=".3"/></linearGradient><linearGradient id="expense-flow"><stop stop-color="#2483ff" stop-opacity=".48"/><stop offset="1" stop-color="#39c4d9" stop-opacity=".28"/></linearGradient></defs><g font-family="Arial,Microsoft YaHei,sans-serif"><g font-size="11" fill="var(--muted)">'+['1. Source','2. Accounts','3. Allocation'].map((name,i)=>'<text text-anchor="'+(compact?'middle':'start')+'" x="'+(xs[i]+(compact?nodeWidth/2:0))+'" y="18">'+(compact?wrapLabel(t(name),nodeWidth).map((line,j)=>'<tspan x="'+(xs[i]+nodeWidth/2)+'" y="'+(14+j*12)+'">'+escapeHtml(line)+'</tspan>').join(''):escapeHtml(t(name)))+'</text>').join('')+'</g>'+paths+
-    (compact ? [income,credit].map((v,i)=>insideNode(xs[0],ss[i],nodeWidth,i?'#343e4f':'#8855f5',t(i?'Credit limit':'Income'),v,capacity)).join('')+cards.map((c,i)=>insideNode(xs[1],cs[i],nodeWidth,c.color,t(c.name)+(accountLast4(c)?' • '+accountLast4(c):''),c.capacity,capacity)).join('')+targets.map((g,i)=>insideNode(xs[2],ts[i],nodeWidth,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',t(g.name),g.value,Math.max(capacity,model.spent))).join('') : [income,credit].map((v,i)=>block(14,ss[i].y,ss[i].h,i?'#343e4f':'#8855f5',v,capacity)+label(59,ss[i].y+3,t(i?'Credit limit':'Income'),v)).join('')+
-    cards.map((c,i)=>'<g><title>'+escapeHtml(t(c.name)+(accountLast4(c)?' • '+accountLast4(c):'')+': '+money(c.capacity))+'</title>'+block(400,cs[i].y,cs[i].h,c.color,c.capacity,capacity)+label(445,cs[i].y+3,t(c.name).slice(0,16)+(accountLast4(c)?' • '+accountLast4(c):''),c.capacity)+'</g>').join('')+
-    targets.map((g,i)=>'<g><title>'+escapeHtml(t(g.name)+': '+money(g.value))+'</title>'+block(777,ts[i].y,ts[i].h,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',g.value,Math.max(capacity,model.spent))+label(821,ts[i].y+2,t(g.name),g.value)+'</g>').join(''))+'</g></svg>';
+    [income,credit].map((v,i)=>interactiveNode(compact?insideNode(xs[0],ss[i],nodeWidth,i?'#343e4f':'#8855f5',t(i?'Credit limit':'Income'),v,capacity):block(14,ss[i].y,ss[i].h,i?'#343e4f':'#8855f5',v,capacity)+label(59,ss[i].y+3,t(i?'Credit limit':'Income'),v),'source:'+i,t(i?'Credit limit':'Income'),v,capacity)).join('')+
+    cards.map((c,i)=>{const name=t(c.name)+(accountLast4(c)?' • '+accountLast4(c):'');return interactiveNode(compact?insideNode(xs[1],cs[i],nodeWidth,c.color,name,c.capacity,capacity):block(400,cs[i].y,cs[i].h,c.color,c.capacity,capacity)+label(445,cs[i].y+3,name,c.capacity),'account:'+c.id,name,c.capacity,capacity)}).join('')+
+    targets.map((g,i)=>interactiveNode(compact?insideNode(xs[2],ts[i],nodeWidth,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',t(g.name),g.value,Math.max(capacity,model.spent)):block(777,ts[i].y,ts[i].h,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',g.value,Math.max(capacity,model.spent))+label(821,ts[i].y+2,t(g.name),g.value),'target:'+i,t(g.name),g.value,capacity)).join('')+'</g></svg>';
 }
 
 // Keep actual repayment cash flows separate from the capacity illustration above.

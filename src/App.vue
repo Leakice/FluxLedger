@@ -3,6 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
 import { flowChart } from './charts';
+import { bindFlowInteraction } from './flowInteraction';
 import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger } from './ledger';
 import { navigationPages, transactionFilters, selectTransactionRows } from './transactionView';
 import EntryDialog from './components/EntryDialog.vue';
@@ -52,10 +53,23 @@ const balances=computed(()=>accountBalances(entries.value,bankCards.value,asOf.v
 const purchases=computed(()=>creditPurchases(entries.value,asOf.value));
 const purchaseFor=id=>purchases.value.find(p=>p.id===id);
 const flowContainer=ref(null), flowWidth=ref(960);
-const flowObserver=new ResizeObserver(([entry])=>{flowWidth.value=entry.contentRect.width});
+let flowResizeFrame = null;
+const flowObserver=new ResizeObserver(([entry])=>{
+  if(flowResizeFrame!==null)cancelAnimationFrame(flowResizeFrame);
+  flowResizeFrame=requestAnimationFrame(()=>{flowWidth.value=Math.floor(entry.contentRect.width)});
+});
 watch(flowContainer,element=>{flowObserver.disconnect();if(element)flowObserver.observe(element)},{flush:'post'});
-onBeforeUnmount(()=>flowObserver.disconnect());
+onBeforeUnmount(()=>{flowObserver.disconnect();if(flowResizeFrame!==null)cancelAnimationFrame(flowResizeFrame);disposeFlow()});
 const flow=computed(()=>flowChart(flowModel.value,chartType.value,t,flowWidth.value));
+let disposeFlow=()=>{};
+watch([flowContainer,flow],()=>{
+  disposeFlow();
+  disposeFlow=bindFlowInteraction(flowContainer.value,t);
+},{flush:'post'});
+watch([flowModel,chartType,language],()=>{
+  if(flowContainer.value && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    flowContainer.value.querySelector('.sankey-chart')?.animate([{opacity:.5},{opacity:1}],{duration:260,easing:'ease-out'});
+},{flush:'post'});
 const rows=computed(()=>selectTransactionRows(entries.value,{kind:recordKind.value,month:month.value,period:period.value,cardIds:cards.value,category:category.value,search:search.value,translate:t,accountLabel:cardName}));
 const activeRecordFilter=computed(()=>transactionFilters.find(kind=>kind.type===recordKind.value));
 const months=computed(()=>Array.from({length:6},(_,i)=>{const d=new Date(month.value+'-01T12:00:00');d.setMonth(d.getMonth()-5+i);const prefix=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const data=entries.value.filter(e=>e.type!=='credit'&&e.date.startsWith(prefix)&&(cards.value.includes(e.card)||cards.value.includes(e.toCard))&&matchesCategory(e));return{label:dateLabel(prefix,true),income:data.filter(e=>e.type==='income').reduce((s,e)=>s+e.amount,0),expense:data.filter(e=>e.type==='expense').reduce((s,e)=>s+e.amount,0),count:data.length}}));
