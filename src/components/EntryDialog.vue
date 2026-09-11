@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
-import { creditAccountCards, entryKinds, resolveCreditAccountCard, accountLast4, isOnlineLoanAccount, accountTypeOf, canRecordIncome, creditPurchases } from '../ledger';
+import { creditAccountCards, entryKinds, resolveCreditAccountCard, accountLast4, isOnlineLoanAccount, accountTypeOf, canRecordIncome, creditPurchases, isCreditSpendingAccount } from '../ledger';
 const props = defineProps({ cards: Array, entries: Array, error: String, t: Function });
 const emit = defineEmits(['save']);
 const dialog = ref(null);
@@ -37,7 +37,7 @@ function save() {
   if (!Number.isFinite(amount) || (form.type === 'credit' ? amount < 0 : amount <= 0) || !form.description.trim() || (loan ? !form.borrower.trim() : !availableCards.value.some(card => card.id === form.card))) return;
   if(form.type==='repayment')linkPurchase();
   form.id ??= crypto.randomUUID();
-  const entry = { ...form, amount, description: form.description.trim(), category: form.type === 'credit' ? 'Credit limit' : form.type==='repayment'?'Repayments':form.category };
+  const entry = { ...form, onCredit: form.type === 'expense' && isCreditSpendingAccount(props.cards.find(c => c.id === form.card)), amount, description: form.description.trim(), category: form.type === 'credit' ? 'Credit limit' : form.type==='repayment'?'Repayments':form.category };
   if (loan) entry.borrower = form.borrower.trim(); else delete entry.borrower;
   if(entry.type!=='repayment'){delete entry.purchaseId;delete entry.toCard;}
   emit('save', entry);
@@ -57,7 +57,6 @@ defineExpose({ open, close: () => dialog.value.close() });
       <label v-if="form.type!=='credit'&&form.type!=='repayment'">{{ t('Category') }}<select v-model="form.category"><option v-for="item in categories" :key="item" :value="item">{{ t(item) }}</option></select></label>
       <label v-if="isLoan()">{{ t('Borrower') }}<input v-model="form.borrower" required maxlength="80" :placeholder="t('e.g. Lender')"></label>
       <label v-else>{{ t(form.type==='repayment'?'Paying account':'Account') }}<select v-model="form.card" required @change="selectCard"><option v-for="card in availableCards" :key="card.id" :value="card.id">{{ t(card.name) }}<template v-if="accountLast4(card)"> · {{ t(card.network) }} •••• {{ accountLast4(card) }}</template></option></select></label>
-      <label v-if="form.type==='expense'" class="credit-toggle"><input v-model="form.onCredit" type="checkbox">{{ t('Credit purchase') }}</label>
       <template v-if="form.type==='repayment'">
         <label>{{ t('Linked credit purchase') }}<select v-model="form.purchaseId" required @change="linkPurchase"><option disabled value="">{{ t('Select credit purchase') }}</option><option v-for="p in purchases" :key="p.id" :value="p.id">{{ p.description }} · {{ t(cards.find(c=>c.id===p.card)?.name) }} · {{ t('Amount due') }} ¥{{ p.due.toFixed(2) }}</option></select></label>
         <p class="form-note">{{ t('Repayment moves cash to a credit account. It is not another expense.') }}</p>

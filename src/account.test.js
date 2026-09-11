@@ -89,9 +89,15 @@ test('v1 accounts and merged navigation survive saves, deletion, imports and rel
     app.navigate('Transactions');
     assert.equal(app.page.value, 'Transactions');
     const renderedNavigation = (await appModule.html()).match(/<nav>([\s\S]*?)<\/nav>/)[1];
-    assert.equal((renderedNavigation.match(/<button/g) || []).length, 2);
+    assert.equal((renderedNavigation.match(/<button/g) || []).length, 3);
     assert.match(renderedNavigation, /Dashboard/);
     assert.match(renderedNavigation, /Transactions/);
+    app.navigate('Dashboard');
+    assert.doesNotMatch(await appModule.html(), /class="repayment-flows"|class="account-balances"/);
+    app.navigate('Repayment records');
+    assert.match(await appModule.html(), /class="repayment-flows"/);
+    assert.match(await appModule.html(), /class="account-balances"/);
+    app.navigate('Transactions');
     assert.doesNotMatch(renderedNavigation, /History|Analytics/);
     let openedType;
     app.entryDialog.value = { close() {}, open(type) { openedType = type; } };

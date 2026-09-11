@@ -63,7 +63,7 @@ body:has(dialog[open]) { overflow: hidden; }
   .language-switch button { font-size: 11px; }
   .theme-switch button { font-size: 24px; }
   .avatar { width: 40px; height: 40px; font-size: 14px; }
-  nav { order: 3; width: 100%; height: 47px; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0; }
+  nav { order: 3; width: 100%; height: 47px; display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 0; }
   nav button { height: 47px; min-width: 0; font-size: 13px; padding: 0 6px; }
   nav button.active:after { left: 18%; right: 18%; }
   .workspace { display: flex; padding: 22px 20px 0; gap: 16px; }
@@ -207,3 +207,23 @@ body:has(dialog[open]) { overflow: hidden; }
 .flow-scroll.is-sankey { overflow: visible; margin-top: 18px; }
 .is-sankey #flow-chart { width: 100%; height: auto; margin: 0; }
 .is-sankey #flow-chart svg { display: block; width: 100%; height: auto; min-height: 0; }
+
+/* Keep the existing palette and geometry; emphasize only the active flow. */
+.flow-interactive-node, .flow-ribbon { transition: opacity .15s ease; }
+.flow-interactive-node[data-flow-id], .flow-ribbon[data-flow-id] { cursor: pointer; }
+.flow-has-hover .sankey-chart .flow-ribbon { opacity: .14; }
+.flow-has-hover .sankey-chart .flow-interactive-node { opacity: .3; }
+.flow-has-hover .sankey-chart .flow-highlight { opacity: 1; }
+[data-flow-id]:focus-visible { outline: none; filter: drop-shadow(0 0 3px var(--blue)); }
+.flow-tooltip { position: fixed; z-index: 100; pointer-events: none; max-width: min(300px, calc(100vw - 16px)); padding: 12px 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); box-shadow: var(--shadow); overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.flow-tooltip strong, .flow-tooltip span { display: block; }
+.flow-tooltip span:last-child { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .flow-interactive-node, .flow-ribbon { transition: none; } }
+
+/* SVG labels follow the same language-specific font as the surrounding UI. */
+#flow-chart svg text { font-family: inherit; font-weight: 400; letter-spacing: normal; }
+
+#repayment-records { padding: 24px 36px; min-height: 65vh; }
+.repayment-chart svg { width: 100%; height: auto; }
+#repayment-records .account-balances { margin: 24px 0; }
+@media(max-width:600px) { #repayment-records { padding: 20px 16px; } #repayment-records > .section-heading { flex-wrap: wrap; } #repayment-records h1 { font-size: 28px; } }

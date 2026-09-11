@@ -3,6 +3,12 @@ export const accountTypes = ['Savings card', 'Credit card', 'Online loan', 'Alip
 export const accountTypeOf = account => account.accountType || 'Savings card';
 export const isBankAccount = account => ['Savings card', 'Credit card'].includes(accountTypeOf(account));
 export const isOnlineLoanAccount = account => !!account && accountTypeOf(account) === 'Online loan';
+export const isCreditSpendingAccount = account => !!account && (isOnlineLoanAccount(account) || accountTypeOf(account) === 'Credit card');
+export function inferCreditExpenses(entries, cards) {
+  return entries.map(entry => entry.type === 'expense'
+    ? { ...entry, onCredit: isCreditSpendingAccount(cards.find(c => c.id === entry.card)) }
+    : entry);
+}
 export const canRecordIncome = (account, originalEntry) => !isOnlineLoanAccount(account) ||
   (originalEntry?.type === 'income' && originalEntry.card === account.id);
 export const loanProviders = ['白条', '花呗', '美团月付', '抖音月付', 'Other'];
@@ -151,7 +157,7 @@ export function validateLedger(entries, cards) {
   return '';
 }
 export function saveTransaction(entries, entry, cards) {
-  const next = entries.some(e => e.id === entry.id) ? entries.map(e => e.id === entry.id ? entry : e) : [...entries, entry];
+  const next = inferCreditExpenses(entries.some(e => e.id === entry.id) ? entries.map(e => e.id === entry.id ? entry : e) : [...entries, entry], cards);
   const error = validateLedger(next, cards);
   if (error) throw new Error(error);
   return next;
