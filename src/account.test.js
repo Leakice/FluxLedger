@@ -94,7 +94,7 @@ test('v1 accounts and merged navigation survive saves, deletion, imports and rel
     assert.match(renderedNavigation, /Transactions/);
     assert.doesNotMatch(renderedNavigation, /History|Analytics/);
     let openedType;
-    app.entryDialog.value = { open(type) { openedType = type; } };
+    app.entryDialog.value = { close() {}, open(type) { openedType = type; } };
     app.openForm('all');
     assert.equal(openedType, 'expense');
     app.selectRecordKind('expense');
@@ -222,6 +222,7 @@ test('legacy loan income can be edited end to end without allowing new loan inco
   try {
     const { state: app } = await harness('./App.vue', {}, scope);
     const { state: dialog, events } = await harness('./components/EntryDialog.vue', { cards: app.bankCards.value });
+    app.entryDialog.value = { close() {} };
     dialog.open('income', legacy.date, legacy);
     assert.ok(dialog.availableCards.value.some(card => card.id === legacy.card));
     dialog.form.description = 'Corrected'; dialog.form.amount = 120; dialog.save();

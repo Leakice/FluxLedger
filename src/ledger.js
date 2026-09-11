@@ -12,6 +12,7 @@ export const accountProvider = account => isBankAccount(account) || isOnlineLoan
 export const entryKinds = [
   { type: 'expense', label: 'Expenses', action: 'Add expense', icon: '↗' },
   { type: 'income', label: 'Income', action: 'Add income', icon: '↙' },
+  { type: 'repayment', label: 'Repayments', action: 'Repay credit', icon: '→' },
   { type: 'credit', label: 'Credit limit', action: 'Set credit limit', icon: '◇' },
 ];
 
@@ -91,7 +92,7 @@ export function withBuiltInAccountCards(cards, hiddenCardIds = []) {
 }
 export function creditLimit(entries, cardId, asOf) {
   const settings = entries.filter(e => e.type === 'credit' && e.card === cardId && e.date <= asOf);
-  settings.sort((a, b) => b.date.localeCompare(a.date) || Number(b.id) - Number(a.id));
+  settings.reverse().sort((a, b) => b.date.localeCompare(a.date) || (Number(b.id) - Number(a.id) || 0));
   return settings[0]?.amount ?? 0;
 }
 
@@ -101,7 +102,7 @@ export function periodEnd(month, period) {
   return `${month}-${String(new Date(year, m, 0).getDate()).padStart(2, '0')}`;
 }
 
-export function buildFlowModel(periodEntries, allEntries, cards, asOf, category = 'All categories') {
+export function buildFlowModel(periodEntries, allEntries, cards, asOf, category = 'All categories', allCards = cards) {
   const nodes = cards.map(card => {
     const records = periodEntries.filter(e => e.card === card.id);
     const income = records.filter(e => e.type === 'income').reduce((s, e) => s + e.amount, 0);
@@ -111,5 +112,47 @@ export function buildFlowModel(periodEntries, allEntries, cards, asOf, category 
     return { ...card, income, credit, capacity: income + credit, expenses, spent, gap: Math.max(0, spent - income - credit) };
   });
   const sum = key => nodes.reduce((s, c) => s + c[key], 0);
-  return { cards: nodes, income: sum('income'), credit: sum('credit'), capacity: sum('capacity'), spent: sum('spent'), gap: sum('gap') };
+  const repayments = periodEntries.filter(e => e.type === 'repayment' && e.date <= asOf && (cards.some(c => c.id === e.card || c.id === e.toCard))).filter(e => category === 'All categories' || allEntries.find(p => p.id === e.purchaseId)?.category === category);
+  return { repayments: repayments.map(e => ({ ...e, source: allCards.find(c => c.id === e.card), target: allCards.find(c => c.id === e.toCard), purchase: creditPurchases(allEntries, asOf).find(p => p.id === e.purchaseId) })), cards: nodes, income: sum('income'), credit: sum('credit'), capacity: sum('capacity'), spent: sum('spent'), gap: sum('gap') };
+}
+
+// Derive balances from records in cents: saving, editing and deleting cannot double-post.
+export const cents = amount => Math.round(Number(amount) * 100);
+export function creditPurchases(entries, asOf = '9999-12-31') {
+  return entries.filter(e => e.type === 'expense' && e.onCredit && e.date <= asOf).map(e => {
+    const paid = entries.filter(r => r.type === 'repayment' && r.purchaseId === e.id && r.date <= asOf).reduce((s,r) => s + cents(r.amount), 0);
+    const due = cents(e.amount) - paid;
+    return { ...e, paid: paid / 100, due: due / 100, status: due === 0 ? 'Paid' : paid > 0 ? 'Partially paid' : 'Unpaid' };
+  });
+}
+export function accountBalances(entries, cards, asOf) {
+  const purchases = creditPurchases(entries, asOf);
+  return cards.map(card => {
+    const cash = entries.filter(e => e.card === card.id && e.date <= asOf).reduce((s,e) => s + (e.type === 'income' ? cents(e.amount) : e.type === 'repayment' || (e.type === 'expense' && !e.onCredit) ? -cents(e.amount) : 0), 0);
+    const debt = purchases.filter(e => e.card === card.id).reduce((s,e) => s + cents(e.due), 0);
+    return { ...card, cash: cash / 100, debt: debt / 100 };
+  });
+}
+export function validateLedger(entries, cards) {
+  const ids = new Set();
+  for (const e of entries) {
+    if (ids.has(e.id)) return 'Duplicate transaction';
+    ids.add(e.id);
+    if (!entryKinds.some(k => k.type === e.type) || !cards.some(c => c.id === e.card)) return 'Invalid account or transaction';
+    if (!Number.isFinite(e.amount) || e.amount < 0 || (e.type !== 'credit' && cents(e.amount) <= 0) || Math.abs(e.amount * 100 - cents(e.amount)) > 0.00001) return 'Invalid amount';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.date) || !Number.isFinite(Date.parse(e.date)) || new Date(e.date).toISOString().slice(0,10) !== e.date) return 'Invalid date';
+    if (e.type === 'repayment') {
+      const purchase = entries.find(p => p.id === e.purchaseId && p.type === 'expense' && p.onCredit);
+      if (!purchase || purchase.card !== e.toCard || e.card === e.toCard) return 'Select a linked credit purchase and a different paying account';
+      if (e.date < purchase.date) return 'Repayment cannot precede purchase';
+    }
+  }
+  if (creditPurchases(entries).some(e => e.due < 0)) return 'Repayment exceeds amount due';
+  return '';
+}
+export function saveTransaction(entries, entry, cards) {
+  const next = entries.some(e => e.id === entry.id) ? entries.map(e => e.id === entry.id ? entry : e) : [...entries, entry];
+  const error = validateLedger(next, cards);
+  if (error) throw new Error(error);
+  return next;
 }

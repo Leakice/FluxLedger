@@ -80,3 +80,5 @@ Object.assign(dictionary, {'Other e-wallet':'其他电子钱包','Bank card':'�
 Object.assign(dictionary, {'All':'全部'});
 
 Object.assign(dictionary, {'Online loan':'网贷','Loan provider':'金融平台','Online loan funding uses credit limits, not income.':'网贷资金通过信用额度记录，不计作收入。'});
+
+Object.assign(dictionary, { 'Repayments':'信用还款','Repay credit':'记还款','Credit purchase':'信用消费','Linked credit purchase':'关联信用消费','Select credit purchase':'选择待还信用消费','Amount due':'剩余应还','Paying account':'付款账户','Receiving account':'收款账户','Paid':'已还清','Partially paid':'部分还款','Unpaid':'待还款','Recorded cash balance':'已记录现金余额','Outstanding credit':'未还负债','Repayment moves cash to a credit account. It is not another expense.':'还款从付款账户流向信用账户，不重复计入消费支出。','Duplicate transaction':'记录编号重复','Invalid account or transaction':'账户或记录类型无效','Invalid amount':'请输入有效金额，最多两位小数','Invalid date':'请输入有效日期','Select a linked credit purchase and a different paying account':'请选择关联信用消费，付款账户须与信用账户不同；删除消费前请先删除关联还款','Repayment cannot precede purchase':'还款日期不能早于消费日期','Repayment exceeds amount due':'还款总额不能超过消费金额','Repayment flow':'还款资金流向','No repayments for these filters.':'当前筛选范围内暂无还款。' });
