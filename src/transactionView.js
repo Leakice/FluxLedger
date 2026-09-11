@@ -1,6 +1,6 @@
 import { entryKinds, periodEnd } from './ledger.js';
 
-export const navigationPages = ['Dashboard', 'Transactions'];
+export const navigationPages = ['Dashboard', 'Transactions', 'Repayment records'];
 export const transactionFilters = [
   { type: 'all', label: 'All', action: 'Add transaction', icon: '≡' },
   ...entryKinds,

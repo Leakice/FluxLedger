@@ -17,8 +17,8 @@ const entries = [
 const options = { month: '2026-09', period: 'month', cardIds: ['a'], category: 'All categories' };
 const ids = rows => rows.map(row => row.id);
 
-test('navigation has exactly two destinations and all five filters are translated', () => {
-  assert.deepEqual(navigationPages, ['Dashboard', 'Transactions']);
+test('navigation has a dedicated repayment destination and all five filters are translated', () => {
+  assert.deepEqual(navigationPages, ['Dashboard', 'Transactions', 'Repayment records']);
   assert.deepEqual(transactionFilters.map(filter => filter.type), ['all', 'expense', 'income', 'repayment', 'credit']);
   for (const item of [...navigationPages, ...transactionFilters.map(filter => filter.label)]) assert.ok(dictionary[item]);
 });

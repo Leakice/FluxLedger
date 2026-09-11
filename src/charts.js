@@ -106,11 +106,13 @@ function capacityChart(model,chartType,t,width=960) {
 
 // Keep actual repayment cash flows separate from the capacity illustration above.
 export function flowChart(model, chartType, t, width) {
-  const base = capacityChart(model, chartType, t, width);
-  if (chartType === 'Category breakdown' || !model.cards.length) return base;
+  return capacityChart(model, chartType, t, width);
+}
+
+export function repaymentChart(model, t) {
   const repayments = model.repayments || [];
   const heading = '<section class="repayment-flows"><h3>'+escapeHtml(t('Repayment flow'))+'</h3><p>'+escapeHtml(t('Repayment moves cash to a credit account. It is not another expense.'))+'</p>';
-  if (!repayments.length) return base + heading + '<p>'+escapeHtml(t('No repayments for these filters.'))+'</p></section>';
+  if (!repayments.length) return heading + '<p>'+escapeHtml(t('No repayments for these filters.'))+'</p></section>';
   const name = (card,id) => card ? t(card.name)+(accountLast4(card)?' · '+accountLast4(card):'') : id;
   const groups = [];
   for (const r of repayments) {
@@ -126,5 +128,5 @@ export function flowChart(model, chartType, t, width) {
   }).join('')+'</g></svg></div>';
   const mobile='<div class="repayment-mobile">'+groups.map(g=>'<div class="mobile-route"><span>'+escapeHtml(name(g.source,g.card))+'</span><b aria-hidden="true">→</b><span>'+escapeHtml(name(g.target,g.toCard))+'</span><strong>'+money(g.value/100)+'</strong></div>').join('')+'</div>';
   const details='<div class="repayment-details">'+groups.map(g=>'<details><summary>'+escapeHtml(name(g.source,g.card)+' → '+name(g.target,g.toCard)+' · '+money(g.value/100))+'</summary>'+g.records.map(r=>'<p>'+escapeHtml(r.date+' · '+r.description+' · '+money(r.amount)+' · '+t('Linked credit purchase')+': '+(r.purchase?.description||r.purchaseId)+(r.purchase?' · '+t(r.purchase.status)+' · '+t('Amount due')+' '+money(r.purchase.due):''))+'</p>').join('')+'</details>').join('')+'</div>';
-  return base+heading+svg+mobile+details+'</section>';
+  return heading+svg+mobile+details+'</section>';
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { creditLimit, periodEnd, buildFlowModel, creditAccountCards, onlineBalanceCards, withBuiltInAccountCards, resolveCreditAccountCard, findLoanCard } from './ledger.js';
-import { flowChart } from './charts.js';
+import { flowChart, repaymentChart } from './charts.js';
 const cards=[{id:'a',name:'Daily',last4:'1234',color:'#888'},{id:'b',name:'Travel',last4:'5678',color:'#555'}];
 const entries=[
  {id:1,type:'income',card:'a',amount:100,date:'2026-09-01',category:'Salary'},
@@ -196,7 +196,7 @@ test('repayment Sankey retains both endpoints with one selected account and link
   const model=buildFlowModel([repayment],all,selected,'2026-09-30','Shopping',cards);
   assert.equal(model.repayments.length,1);
   assert.equal(model.spent,0);
-  const html=flowChart(model,'Sankey diagram',s=>s);
+  const html=repaymentChart(model,s=>s);
   assert.ok(html.includes('Daily · 1234 → Travel · 5678'));
   assert.ok(html.includes('Laptop'));
   assert.ok(html.includes('¥400.00'));
@@ -209,11 +209,24 @@ test('repayment Sankey retains both endpoints with one selected account and link
 test('repayment graph escapes descriptions and account names',()=>{
  const all=saveTransaction(creditRecords,{...repayment,description:'<script>alert(1)</script>'},cards);
  const model=buildFlowModel(all,all,[{...cards[0],name:'<img src=x>'},cards[1]],'2026-09-30');
- const html=flowChart(model,'Sankey diagram',s=>s);
+ const html=repaymentChart(model,s=>s);
  assert.ok(!html.includes('<script>'));assert.ok(!html.includes('<img'));
 });
 
 test('same-day credit limits work with UUID record identifiers',()=>{
  const limits=[{type:'credit',card:'a',id:'old-uuid',amount:100,date:'2026-09-01'},{type:'credit',card:'a',id:'new-uuid',amount:200,date:'2026-09-01'}];
  assert.equal(creditLimit(limits,'a','2026-09-30'),200);
+});
+
+test('automatic credit expenses participate in repayment and balances',async()=>{
+  const {saveTransaction,creditPurchases,accountBalances,inferCreditExpenses}=await import('./ledger.js');
+  const accounts=[{id:'cash',accountType:'Savings card'},{id:'credit',accountType:'Credit card'},{id:'loan',accountType:'Online loan'}];
+  const expense={id:'p',type:'expense',card:'credit',amount:100,date:'2026-09-10',description:'Purchase',category:'Other',onCredit:false};
+  let ledger=saveTransaction([],expense,accounts);
+  assert.equal(ledger[0].onCredit,true);
+  assert.equal(inferCreditExpenses([{...expense,card:'loan'}],accounts)[0].onCredit,true);
+  ledger=saveTransaction(ledger,{id:'r',type:'repayment',card:'cash',toCard:'credit',purchaseId:'p',amount:40,date:'2026-09-11'},accounts);
+  assert.equal(creditPurchases(ledger)[0].due,60);
+  assert.equal(accountBalances(ledger,accounts,'2026-09-30').find(c=>c.id==='credit').cash,0);
+  assert.equal(accountBalances(ledger,accounts,'2026-09-30').find(c=>c.id==='cash').cash,-40);
 });

@@ -2,9 +2,9 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { seed } from './seed';
 import { dictionary } from './locales';
-import { flowChart } from './charts';
+import { flowChart, repaymentChart } from './charts';
 import { bindFlowInteraction } from './flowInteraction';
-import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger } from './ledger';
+import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger, inferCreditExpenses } from './ledger';
 import { navigationPages, transactionFilters, selectTransactionRows } from './transactionView';
 import EntryDialog from './components/EntryDialog.vue';
 import CardDialog from './components/CardDialog.vue';
@@ -14,6 +14,7 @@ const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fa
 const entries=ref(read('cascade-transactions-v1',seed));
 const hiddenBuiltInCardIds=ref(read('fluxledger-hidden-built-in-cards-v1',[]));
 const bankCards=ref(withBuiltInAccountCards(read('fluxledger-cards-v1',defaultCards),hiddenBuiltInCardIds.value));
+entries.value=inferCreditExpenses(entries.value,bankCards.value);
 const entryDialog=ref(null), cardDialog=ref(null), dataDialog=ref(null), recordKind=ref('all');
 const language=ref(localStorage.getItem('cascade-language')||'en');
 const dark=ref(localStorage.getItem('cascade-theme')==='dark');
@@ -49,6 +50,11 @@ const sources=computed(()=>{const totals={};filtered.value.filter(e=>e.type===(r
 const percent=i=>{const total=sources.value.reduce((s,e)=>s+e[1],0);return total?Math.round((sources.value[i]?.[1]||0)/total*100):0};
 const donutStyle=computed(()=>({background:`conic-gradient(#ff852b 0 ${percent(0)}%,var(--panel) ${percent(0)}% ${Math.min(100,percent(0)+1)}%,#e6e9ea ${Math.min(100,percent(0)+1)}% 100%)`}));
 const flowModel=computed(()=>buildFlowModel(periodEntries.value,entries.value,bankCards.value.filter(c=>cards.value.includes(c.id)),asOf.value,category.value,bankCards.value));
+const repaymentMonth=ref('2026-09');
+const repaymentModel=computed(()=>buildFlowModel(entries.value.filter(e=>e.date.startsWith(repaymentMonth.value)),entries.value,bankCards.value,periodEnd(repaymentMonth.value,'month'),'All categories',bankCards.value));
+const repaymentFlow=computed(()=>repaymentChart(repaymentModel.value,t));
+const repaymentBalances=computed(()=>accountBalances(entries.value,bankCards.value,periodEnd(repaymentMonth.value,'month')));
+const repaymentRows=computed(()=>entries.value.filter(e=>e.type==='repayment'&&e.date.startsWith(repaymentMonth.value)).sort((a,b)=>b.date.localeCompare(a.date)));
 const balances=computed(()=>accountBalances(entries.value,bankCards.value,asOf.value));
 const purchases=computed(()=>creditPurchases(entries.value,asOf.value));
 const purchaseFor=id=>purchases.value.find(p=>p.id===id);
@@ -81,7 +87,7 @@ function toast(message){notification.value=message;clearTimeout(toastTimer);toas
 function navigate(next){page.value=navigationPages.includes(next)?next:'Dashboard';if(page.value==='Dashboard')report.value='Overview'}
 function selectRecordKind(kind){recordKind.value=kind;category.value='All categories'}
 function reset(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';toast('Filters reset')}
-function openForm(type='expense',entry=null){formError.value='';entryDialog.value.open(type==='all'?'expense':type,month.value+'-10',entry)}
+function openForm(type='expense',entry=null){formError.value='';entryDialog.value.open(type==='all'?'expense':type,(page.value==='Repayment records'?repaymentMonth.value:month.value)+'-10',entry)}
 function openRepayment(entry){openForm('repayment',{id:null,description:'Repayment · '+entry.description,purchaseId:entry.id,toCard:entry.card,card:bankCards.value.find(c=>c.id!==entry.card)?.id||'',amount:purchaseFor(entry.id)?.due||'',date:asOf.value < entry.date ? entry.date : month.value+'-'+String(Math.max(10,entry.date.startsWith(month.value)?Number(entry.date.slice(-2)):1)).padStart(2,'0')})}
 function loanCardFor(borrower, currentCardId) {
   const existing = findLoanCard(bankCards.value, borrower, currentCardId);
@@ -95,7 +101,7 @@ function saveEntry(entry){
   if(entry.type==='credit'&&entry.description==='借款'&&entry.borrower){entry={...entry,card:loanCardFor(entry.borrower.trim(),entry.card),borrower:entry.borrower.trim()}}
   const existing=entries.value.some(e=>e.id===entry.id);
   try{entries.value=saveTransaction(entries.value,{...entry,id:entry.id??crypto.randomUUID()},bankCards.value)}catch(error){formError.value=error.message;return;}
-  entryDialog.value.close();month.value=entry.date.slice(0,7);if(recordKind.value!=='all')recordKind.value=entry.type;toast(existing?'Transaction updated':'Transaction saved on this device');
+  entryDialog.value.close();if(entry.type==='repayment')repaymentMonth.value=entry.date.slice(0,7);month.value=entry.date.slice(0,7);if(recordKind.value!=='all')recordKind.value=entry.type;toast(existing?'Transaction updated':'Transaction saved on this device');
 }
 function saveCard(card){
   const isNew = !card.id;
@@ -112,7 +118,7 @@ function removeCard(id){
 }
 function remove(entry){const next=entries.value.filter(e=>e.id!==entry.id);const error=validateLedger(next,bankCards.value);if(error){toast(error);return;}deleted.value=entry;entries.value=next;toast('Transaction deleted')}
 function undo(){if(deleted.value){try{entries.value=saveTransaction(entries.value,deleted.value,bankCards.value);deleted.value=null;notification.value=''}catch(error){toast(error.message)}}}
-function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.value=payload.hiddenBuiltInCardIds||[];bankCards.value=withBuiltInAccountCards(payload.cards,hiddenBuiltInCardIds.value);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='all';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
+function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.value=payload.hiddenBuiltInCardIds||[];bankCards.value=withBuiltInAccountCards(payload.cards,hiddenBuiltInCardIds.value);entries.value=inferCreditExpenses(entries.value,bankCards.value);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='all';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
 watch(bankCards,value=>localStorage.setItem('fluxledger-cards-v1',JSON.stringify(value)),{deep:true});
 watch(hiddenBuiltInCardIds,value=>localStorage.setItem('fluxledger-hidden-built-in-cards-v1',JSON.stringify(value)),{deep:true});
 watch(entries,value=>localStorage.setItem('cascade-transactions-v1',JSON.stringify(value)),{deep:true});
@@ -136,7 +142,6 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
       <div class="workspace"><div class="flow-panel">
         <div class="section-heading"><div class="title-group"><h1>{{ t('Money Flow') }}</h1><select v-model="chartType" :aria-label="t('Chart type')"><option v-for="item in ['Sankey diagram','Category breakdown']" :key="item" :value="item">{{ t(item) }}</option></select></div><div class="tools"><button class="data-manager-trigger" :title="t('Data management')" :aria-label="t('Data management')" @click="dataDialog.open()"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/></svg><span>{{ t('Data management') }}</span></button><button v-for="kind in entryKinds" :key="kind.type" class="quick-entry" :class="kind.type" :title="t(kind.action)" @click="openForm(kind.type)"><span>{{ kind.icon }}</span>{{ t(kind.label) }}</button></div></div>
         <p v-if="chartType!=='Sankey diagram'" class="chart-scroll-hint">↔ {{ t('Swipe to explore the money flow') }}</p><div ref="flowContainer" class="flow-scroll" :class="{'is-sankey':chartType==='Sankey diagram'}" tabindex="0" role="region" :aria-label="t(chartType==='Sankey diagram'?'Money Flow':'Money flow chart, scroll horizontally')"><div id="flow-chart" v-html="flow"/></div>
-        <section class="account-balances"><article v-for="account in balances.filter(c=>cards.includes(c.id))" :key="account.id"><strong>{{ cardName(account.id) }}</strong><span>{{ t('Recorded cash balance') }} {{ signed(account.cash) }}</span><span>{{ t('Outstanding credit') }} {{ money(account.debt) }}</span></article></section>
         <div class="flow-footer"><span><i class="live-dot"/>{{ t('Income + credit limit · capacity, not cash balance') }}</span><span>{{ periodLabel }} ↗</span></div><p v-if="flowModel.gap>0" class="funding-note">{{ t('Expenses above recorded funding') }}: {{ money(flowModel.gap) }}</p>
       </div>
       <aside class="filter-panel" :class="{'is-expanded':filtersOpen}"><div class="aside-title"><h2 class="desktop-filter-title">{{ t('Filters') }}</h2><button class="mobile-filter-toggle" :aria-expanded="filtersOpen" aria-controls="filter-content" @click="filtersOpen=!filtersOpen"><span><strong>{{ t('Filters') }}</strong><small>{{ periodLabel }} · {{ cards.length }}/{{ bankCards.length }} {{ t('Accounts') }} · {{ t(category) }}</small></span><span class="filter-chevron" aria-hidden="true">⌄</span></button><button class="icon" :title="t('Reset filters')" @click="reset">↺</button></div><div id="filter-content" class="filter-content">
@@ -152,6 +157,12 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
         <article class="balance"><div class="card-heading"><h3>{{ t('Monthly Balance') }}</h3><span class="legend"><i/>{{ t('Income') }}<i/>{{ t('Expenses') }}</span></div><div id="balance-chart"><svg viewBox="0 0 430 208"><g font-family="Arial" font-size="9" fill="#93999e"><g v-for="i in [0,1,2,3]" :key="i"><text x="0" :y="178-i*47">{{ i?'¥'+Math.round(chartMax*i/3/1000)+'K':'0' }}</text><path :d="`M35 ${176-i*47}H424`" stroke="var(--line)" stroke-dasharray="2 5"/></g><g v-for="(bar,i) in months" :key="i"><rect :x="40+i*64" :y="176-bar.income/chartMax*145" width="50" :height="Math.max(bar.income/chartMax*145,3)" rx="8" :fill="i===4?'#1d78fa':'#c2e7fa'"/><text :x="65+i*64" y="198" text-anchor="middle">{{ bar.label }}</text><g v-if="i===4&&bar.income"><rect :x="47+i*64" :y="149-bar.income/chartMax*145" width="42" height="21" rx="7" fill="#111"/><text :x="68+i*64" :y="163-bar.income/chartMax*145" text-anchor="middle" fill="white">¥{{ (bar.income/1000).toFixed(1) }}K</text></g></g><polyline :points="linePoints" fill="none" stroke="#5bbdca" stroke-width="2"/><circle v-for="(bar,i) in months" :key="'dot'+i" :cx="65+i*64" :cy="176-bar.expense/chartMax*145" r="2.5" stroke="#5bbdca" stroke-width="1.5" fill="var(--panel)"/></g></svg></div><div class="stat-row"><span>{{ period==='year'?periodLabel:dateLabel(month,true) }}</span><b>+{{ money(income) }}</b><b>−{{ money(expenses) }}</b></div><div class="stat-row"><span>{{ previousLabel }}</span><b>+{{ money(previousIncome) }}</b><b>−{{ money(previousExpenses) }}</b></div></article>
         </div>
       </section>
+    </section>
+    <section v-else-if="page==='Repayment records'" id="repayment-records">
+      <div class="section-heading"><h1>{{ t('Repayment records') }}</h1><div class="tools"><input type="month" :value="repaymentMonth" @change="repaymentMonth=$event.target.value||repaymentMonth" :aria-label="t('Select period')"><button class="primary" @click="openForm('repayment')">{{ t('Repay credit') }}</button></div></div>
+      <div class="repayment-chart" v-html="repaymentFlow"/>
+        <section class="account-balances"><article v-for="account in repaymentBalances" :key="account.id"><strong>{{ cardName(account.id) }}</strong><span>{{ t('Recorded cash balance') }} {{ signed(account.cash) }}</span><span>{{ t('Outstanding credit') }} {{ money(account.debt) }}</span></article></section>
+      <div class="table-wrap" v-if="repaymentRows.length"><table><thead><tr><th>{{ t('Date') }}</th><th>{{ t('Description') }}</th><th>{{ t('Account') }}</th><th>{{ t('Amount') }}</th><th>{{ t('Actions') }}</th></tr></thead><tbody><tr v-for="entry in repaymentRows" :key="entry.id"><td>{{ entry.date }}</td><td>{{ entry.description }}</td><td>{{ cardName(entry.card) }} → {{ cardName(entry.toCard) }}</td><td>{{ money(entry.amount) }}</td><td><button @click="openForm('repayment',entry)">{{ t('Edit') }}</button><button @click="remove(entry)">{{ t('Delete') }}</button></td></tr></tbody></table></div>
     </section>
     <section v-else id="transactions">
       <div class="section-heading"><div><span class="eyebrow">{{ t('YOUR EVERYDAY MONEY') }}</span><h1>{{ t('Transactions') }}</h1></div><button class="data-manager-trigger" :title="t('Data management')" :aria-label="t('Data management')" @click="dataDialog.open()"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/></svg><span>{{ t('Data management') }}</span></button></div>
