@@ -70,7 +70,7 @@ for (const accountType of ['Alipay', 'WeChat Pay', 'Online banking', 'Other']) {
   });
 }
 
-test('v1 localStorage accounts, new transactions, deletion and reload work together', async t => {
+test('v1 accounts and merged navigation survive saves, deletion, imports and reload', async t => {
   let timestamp = Date.now();
   t.mock.method(Date, 'now', () => ++timestamp);
   const legacy = { id: 'old-bank', name: 'Old bank', last4: '4321', network: 'Visa', color: '#2784f7' };
@@ -84,6 +84,20 @@ test('v1 localStorage accounts, new transactions, deletion and reload work toget
     // Start setup inside a scope so all persistence watchers can be stopped.
     const appModule = await harness('./App.vue', {}, scope);
     const app = appModule.state;
+    assert.equal(app.page.value, 'Dashboard');
+    assert.equal(app.recordKind.value, 'all');
+    app.navigate('Transactions');
+    assert.equal(app.page.value, 'Transactions');
+    const renderedNavigation = (await appModule.html()).match(/<nav>([\s\S]*?)<\/nav>/)[1];
+    assert.equal((renderedNavigation.match(/<button/g) || []).length, 2);
+    assert.match(renderedNavigation, /Dashboard/);
+    assert.match(renderedNavigation, /Transactions/);
+    assert.doesNotMatch(renderedNavigation, /History|Analytics/);
+    let openedType;
+    app.entryDialog.value = { open(type) { openedType = type; } };
+    app.openForm('all');
+    assert.equal(openedType, 'expense');
+    app.selectRecordKind('expense');
     assert.deepEqual({ ...app.bankCards.value.find(card => card.id === legacy.id) }, legacy);
     for (const [index, accountType] of ['Alipay', 'WeChat Pay'].entries()) {
       const { state: dialog, events } = await harness('./components/CardDialog.vue');
@@ -97,6 +111,7 @@ test('v1 localStorage accounts, new transactions, deletion and reload work toget
         entry.open(type, '2026-09-10');
         Object.assign(entry.form, { id: 100 + index * 2 + offset, card: wallet.id, description: 'Transfer', category: 'Transfer', amount });
         entry.save(); app.saveEntry(recorded.at(-1)[1]);
+        assert.equal(app.page.value, 'Transactions');
       }
       await nextTick();
       assert.equal(app.rows.value.filter(row => row.card === wallet.id).length, 1);
@@ -119,8 +134,6 @@ test('v1 localStorage accounts, new transactions, deletion and reload work toget
       assert.ok(!JSON.parse(storage.get('fluxledger-cards-v1')).some(card => card.id === wallet.id));
     }
     assert.deepEqual(JSON.parse(storage.get('fluxledger-cards-v1')).find(card => card.id === legacy.id), legacy);
-    let openedType;
-    app.entryDialog.value = { open(type) { openedType = type; } };
     app.saveCard({ name: 'Custom lender', accountType: 'Online loan', network: 'Other', last4: '', noLast4: true, color: '#8659e7' });
     assert.equal(openedType, 'credit');
     const loan = app.bankCards.value.find(card => card.name === 'Custom lender');
@@ -130,6 +143,27 @@ test('v1 localStorage accounts, new transactions, deletion and reload work toget
     app.saveEntry({ type: 'credit', card: loan.id, amount: 100, date: '2026-09-10', description: loan.name, category: 'Credit limit' });
     assert.equal(app.flowModel.value.credit, 100);
     assert.equal(app.income.value, 0);
+    const imported = { id: 999, type: 'expense', description: 'Imported', date: '2024-01-01', card: legacy.id, amount: 5, category: 'Shopping' };
+    app.importData({ entries: [imported], cards: [legacy] });
+    assert.equal(app.page.value, 'Transactions');
+    assert.equal(app.recordKind.value, 'all');
+    app.month.value = '2026-09'; app.cards.value = []; app.category.value = 'Missing';
+    assert.deepEqual(app.rows.value.map(row => row.id), [999]);
+    app.search.value = 'Imported'; app.selectRecordKind('expense');
+    assert.equal(app.search.value, 'Imported');
+    assert.equal(app.rows.value.length, 0);
+    app.selectRecordKind('all'); assert.deepEqual(app.rows.value.map(row => row.id), [999]);
+    app.saveEntry({ ...imported, description: 'Imported edit' });
+    assert.equal(app.recordKind.value, 'all');
+    assert.equal(app.page.value, 'Transactions');
+    app.navigate('Dashboard'); assert.equal(app.page.value, 'Dashboard');
+    assert.match(appModule.source, /@click.prevent="navigate\('Dashboard'\)"/);
+    app.navigate('unknown-page'); assert.equal(app.page.value, 'Dashboard');
+    await nextTick();
+    const reloaded = await harness('./App.vue', {}, scope);
+    assert.equal(reloaded.state.page.value, 'Dashboard');
+    assert.equal(reloaded.state.recordKind.value, 'all');
+    assert.deepEqual(reloaded.state.rows.value.map(row => row.id), [999]);
     app.toast('');
   } finally {
     scope.stop();

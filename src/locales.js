@@ -1,5 +1,5 @@
   export const dictionary = {
-    'Dashboard':'总览','Transactions':'交易记录','Analytics':'分析','History':'历史',
+    'Dashboard':'总览','Transactions':'交易记录',
     'Money Flow':'资金流向','Sankey diagram':'桑基图','Category breakdown':'分类明细',
     'Filters':'筛选','Time period':'时间范围','Month':'月度','Year':'年度','Cards':'银行卡',
     'Credit card':'信用卡','Categories':'分类','All categories':'全部分类',
@@ -14,7 +14,7 @@
     'In-store shopping':'线下消费','September':'九月','August':'八月','Apr':'4月','May':'5月',
     'Jun':'6月','Jul':'7月','Aug':'8月','Sep':'9月','Jan':'1月','Feb':'2月','Mar':'3月','Oct':'10月','Nov':'11月','Dec':'12月',
     'A clear view of your financial world.':'每一笔收支，都清清楚楚。','Local workspace':'本地工作区',
-    'YOUR EVERYDAY MONEY':'记录日常的每一笔','Transaction history':'交易历史',
+    'YOUR EVERYDAY MONEY':'记录日常的每一笔',
     '＋ Add transaction':'＋ 新增交易','Add transaction':'新增交易','Description':'交易说明','Category':'分类',
     'Date':'日期','Card':'银行卡','Amount':'金额','Amount (¥)':'金额（人民币）','Type':'类型','Expense':'支出',
     'A small entry. A clearer picture.':'记下一笔，看清生活。','Save transaction ↗':'保存交易 ↗',
@@ -76,5 +76,7 @@ Object.assign(dictionary, {
 });
 
 Object.assign(dictionary, {'Other e-wallet':'其他电子钱包','Bank card':'普通银行卡'});
+
+Object.assign(dictionary, {'All':'全部'});
 
 Object.assign(dictionary, {'Online loan':'网贷','Loan provider':'金融平台','Online loan funding uses credit limits, not income.':'网贷资金通过信用额度记录，不计作收入。'});
