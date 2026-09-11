@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { creditLimit, periodEnd, buildFlowModel, creditAccountCards, onlineBalanceCards, withBuiltInAccountCards, resolveCreditAccountCard, findLoanCard } from './ledger.js';
 import { flowChart, repaymentChart } from './charts.js';
-const cards=[{id:'a',name:'Daily',last4:'1234',color:'#888'},{id:'b',name:'Travel',last4:'5678',color:'#555'}];
+const cards=[{id:'a',name:'Daily',last4:'1234',color:'#888',accountType:'Savings card'},{id:'b',name:'Travel',last4:'5678',color:'#555',accountType:'Credit card'}];
 const entries=[
  {id:1,type:'income',card:'a',amount:100,date:'2026-09-01',category:'Salary'},
  {id:2,type:'expense',card:'a',amount:140,date:'2026-09-02',category:'Food & Drinks'},
@@ -177,7 +177,8 @@ test('invalid links, dates, amounts, duplicates and changes to paid purchases ar
  const partial=saveTransaction(creditRecords,repayment,cards);
  assert.throws(()=>saveTransaction(partial,{...repayment,id:'r2',amount:601},cards));
  assert.throws(()=>saveTransaction(partial,{...creditRecords[1],amount:399},cards));
- assert.throws(()=>saveTransaction(partial,{...creditRecords[1],onCredit:false},cards));
+ const normalized=saveTransaction(partial,{...creditRecords[1],onCredit:false},cards);
+ assert.equal(normalized.find(e=>e.id==='purchase').onCredit,true);
  assert.throws(()=>saveTransaction(partial,{...creditRecords[1],card:'a'},cards));
  assert.ok(validateLedger(partial.filter(e=>e.id!=='purchase'),cards));
  assert.ok(validateLedger([...partial,repayment],cards));
@@ -229,4 +230,14 @@ test('automatic credit expenses participate in repayment and balances',async()=>
   assert.equal(creditPurchases(ledger)[0].due,60);
   assert.equal(accountBalances(ledger,accounts,'2026-09-30').find(c=>c.id==='credit').cash,0);
   assert.equal(accountBalances(ledger,accounts,'2026-09-30').find(c=>c.id==='cash').cash,-40);
+});
+
+test("credit inference clears stale flags from non-credit expenses",async()=>{
+  const {accountBalances,creditPurchases,inferCreditExpenses}=await import("./ledger.js");
+  const accounts=[{id:"cash",accountType:"Savings card"},{id:"credit",accountType:"Credit card"}];
+  const stale={id:"stale",type:"expense",card:"cash",amount:100,date:"2026-09-10",description:"Cash purchase",category:"Other",onCredit:true};
+  const normalized=inferCreditExpenses([stale],accounts);
+  assert.equal(normalized[0].onCredit,false);
+  assert.equal(creditPurchases(normalized).length,0);
+  assert.equal(accountBalances(normalized,accounts,"2026-09-30").find(c=>c.id==="cash").cash,-100);
 });

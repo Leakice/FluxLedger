@@ -5,7 +5,9 @@ export const isBankAccount = account => ['Savings card', 'Credit card'].includes
 export const isOnlineLoanAccount = account => !!account && accountTypeOf(account) === 'Online loan';
 export const isCreditSpendingAccount = account => !!account && (isOnlineLoanAccount(account) || accountTypeOf(account) === 'Credit card');
 export function inferCreditExpenses(entries, cards) {
-  return entries.map(entry => entry.type === 'expense' && isCreditSpendingAccount(cards.find(c => c.id === entry.card)) ? { ...entry, onCredit: true } : entry);
+  return entries.map(entry => entry.type === 'expense'
+    ? { ...entry, onCredit: isCreditSpendingAccount(cards.find(c => c.id === entry.card)) }
+    : entry);
 }
 export const canRecordIncome = (account, originalEntry) => !isOnlineLoanAccount(account) ||
   (originalEntry?.type === 'income' && originalEntry.card === account.id);
