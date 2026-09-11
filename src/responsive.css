@@ -134,9 +134,10 @@ body:has(dialog[open]) { overflow: hidden; }
   .transaction-card-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   .transaction-card time { font-size: 11px; color: var(--muted); }
   .transaction-card h3 { font-size: 16px; font-weight: 500; margin: 15px 0 8px; line-height: 1.5; overflow-wrap: anywhere; }
-  .transaction-amount { display: block; font-size: 25px; font-weight: 500; letter-spacing: -.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  /* Imports may exceed the entry dialog limit; keep their full amounts scrollable. */
+  .transaction-amount { display: block; max-width: 100%; overflow-x: auto; font-size: 25px; font-weight: 500; letter-spacing: -.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .transaction-amount.income { color: #139169; }
-  .transaction-amount.credit { width: auto; height: auto; position: static; box-shadow: none; overflow: visible; color: #8b6ac4; border-radius: 0; }
+  .transaction-amount.credit { width: auto; height: auto; position: static; box-shadow: none; color: #8b6ac4; border-radius: 0; }
   .transaction-card dl { margin: 16px 0 12px; display: grid; gap: 10px; }
   .transaction-card dl > div { display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 10px; align-items: start; }
   .transaction-card dt { font-size: 11px; color: var(--muted); line-height: 1.5; }
