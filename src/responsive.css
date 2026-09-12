@@ -217,6 +217,10 @@ body:has(dialog[open]) { overflow: hidden; }
 .flow-has-hover .sankey-chart .flow-interactive-node { opacity: .3; }
 .flow-has-hover .sankey-chart .flow-highlight { opacity: 1; }
 [data-flow-id]:focus-visible { outline: none; filter: drop-shadow(0 0 3px var(--blue)); }
+/* Mouse clicks land on :focus (not :focus-visible); suppress the UA outline there, keyboard keeps the cues above and in reports.css. */
+.flow-interactive-node:focus, .flow-ribbon:focus, .source-slice:focus, .frequency-point rect[tabindex]:focus { outline: none; }
+/* Charts are graphics, not copy: drags and double-clicks must not leave text selections behind. */
+#flow-chart, #balance-chart, #frequency-chart, .source-chart, .repayment-chart, .repayment-scroll { user-select: none; }
 .flow-tooltip { position: fixed; z-index: 100; pointer-events: none; max-width: min(300px, calc(100vw - 16px)); padding: 12px 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); box-shadow: var(--shadow); overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
 .flow-tooltip strong, .flow-tooltip span { display: block; }
 .flow-tooltip span:last-child { color: var(--muted); }

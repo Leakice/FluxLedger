@@ -43,13 +43,20 @@ function save() {
   emit('save', entry);
 
 }
+// dialog.close() refocuses the pre-open trigger and Chromium paints a stale
+// :focus-visible ring on it; pointer clicks (detail > 0) blur that restored
+// focus, keyboard-activated clicks (detail 0) and Esc's cancel path keep it.
+function closeFromPointer(event) {
+  dialog.value.close();
+  if (event?.detail > 0) document.activeElement?.blur?.();
+}
 defineExpose({ open, close: () => dialog.value.close() });
 </script>
 
 <template>
   <dialog ref="dialog" class="edit-dialog">
     <form @submit.prevent="save">
-      <div class="card-heading"><div><span class="eyebrow">{{ t(entryKinds.find(k=>k.type===form.type)?.label || 'Expenses') }}</span><h2>{{ t(form.id?'Edit transaction':entryKinds.find(k=>k.type===form.type)?.action || 'Add expense') }}</h2></div><button type="button" class="icon" :aria-label="t('Close')" @click="dialog.close()">×</button></div>
+      <div class="card-heading"><div><span class="eyebrow">{{ t(entryKinds.find(k=>k.type===form.type)?.label || 'Expenses') }}</span><h2>{{ t(form.id?'Edit transaction':entryKinds.find(k=>k.type===form.type)?.action || 'Add expense') }}</h2></div><button type="button" class="icon" :aria-label="t('Close')" @click="closeFromPointer">×</button></div>
       <p class="form-note">{{ t(form.type==='credit'?'The latest limit replaces the previous limit. It is not income.':'A small entry. A clearer picture.') }}</p>
       <label v-if="form.type==='credit'">{{ t('Description') }}<select v-model="form.description" required @change="selectCreditAccount(form.description)"><option v-for="account in creditAccounts" :key="account" :value="account">{{ account }}</option><option v-if="form.description && !creditAccounts.includes(form.description)" :value="form.description">{{ form.description }}</option></select></label>
       <label v-else>{{ t('Description') }}<input v-model="form.description" required maxlength="80" :placeholder="t('e.g. Groceries')"></label>

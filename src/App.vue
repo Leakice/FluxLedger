@@ -122,7 +122,7 @@ function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.
 watch(bankCards,value=>localStorage.setItem('fluxledger-cards-v1',JSON.stringify(value)),{deep:true});
 watch(hiddenBuiltInCardIds,value=>localStorage.setItem('fluxledger-hidden-built-in-cards-v1',JSON.stringify(value)),{deep:true});
 watch(entries,value=>localStorage.setItem('cascade-transactions-v1',JSON.stringify(value)),{deep:true});
-watch(language,value=>{localStorage.setItem('cascade-language',value);document.documentElement.lang=value==='zh'?'zh-CN':'en';document.title=value==='zh'?'Cascade — 本地记账':'Cascade — Money in motion'},{immediate:true});
+watch(language,value=>{localStorage.setItem('cascade-language',value);document.documentElement.lang=value==='zh'?'zh-CN':'en';document.title=value==='zh'?'FluxLedger——回应每一次资金流动。':'FluxLedger — In tune with every money movement.'},{immediate:true});
 watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.setItem('cascade-theme',value?'dark':'light')},{immediate:true});
 </script>
 
