@@ -26,6 +26,13 @@ function removeCard() {
   emit('remove', form.id);
   dialog.value.close();
 }
+// dialog.close() refocuses the pre-open trigger and Chromium paints a stale
+// :focus-visible ring on it; pointer clicks (detail > 0) blur that restored
+// focus, keyboard-activated clicks (detail 0) and Esc's cancel path keep it.
+function closeFromPointer(event) {
+  dialog.value.close();
+  if (event?.detail > 0) document.activeElement?.blur?.();
+}
 function save() {
   if (!form.name.trim() || (bankAccount.value && !form.noLast4 && !/^\d{4}$/.test(form.last4))) return;
   emit('save', { ...form, accountTypeVersion: 1, name: form.name.trim(), ...(bankAccount.value ? {} : { last4: '', noLast4: true, network: accountProvider(form) }) });
@@ -37,7 +44,7 @@ defineExpose({ open });
 <template>
   <dialog ref="dialog" class="edit-dialog">
     <form @submit.prevent="save">
-      <div class="card-heading"><h2>{{ t(form.id?'Edit account':'Add account') }}</h2><button class="icon" type="button" :aria-label="t('Close')" @click="dialog.close()">×</button></div>
+      <div class="card-heading"><h2>{{ t(form.id?'Edit account':'Add account') }}</h2><button class="icon" type="button" :aria-label="t('Close')" @click="closeFromPointer">×</button></div>
       <div class="card-preview" :style="{'--card-color':form.color}"><span>{{ t(accountProvider(form)) }}</span><strong v-if="accountLast4(form)">•••• &nbsp; •••• &nbsp; •••• &nbsp; {{ accountLast4(form) }}</strong><small>{{ form.name||t('Account name') }}</small><i>◇</i></div>
       <label>{{ t('Account name') }}<input v-model="form.name" maxlength="40" required :placeholder="t('e.g. Everyday account')"></label>
       <label>{{ t('Account type') }}<select v-model="form.accountType" @change="selectAccountType"><option v-if="form.accountType && !accountTypes.includes(form.accountType)" :value="form.accountType">{{ t(form.accountType) }}</option><option v-for="accountType in accountTypes" :key="accountType" :value="accountType">{{ t(accountType === 'Other' ? 'Other e-wallet' : accountType === 'Savings card' ? 'Bank card' : accountType) }}</option></select></label>
