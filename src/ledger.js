@@ -55,8 +55,8 @@ export function findLoanCard(cards, borrower, currentCardId) {
 }
 
 export const defaultCards = [
-  { id: '4329', name: 'Everyday card', last4: '4329', network: 'Visa', accountType: 'Savings card', color: '#f4cf35' },
-  { id: '8851', name: 'Lifestyle card', last4: '8851', network: 'Mastercard', accountType: 'Savings card', color: '#2784f7' },
+  { id: '4329', name: 'Everyday card', last4: '1001', network: 'Visa', accountType: 'Savings card', color: '#f4cf35' },
+  { id: '8851', name: 'Lifestyle card', last4: '1002', network: 'Mastercard', accountType: 'Savings card', color: '#2784f7' },
   ...builtInAccountCards,
 ];
 

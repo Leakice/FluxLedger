@@ -52,3 +52,9 @@ export function flowTransactionFilter({flowId='',source='',target='',category}={
   if(/^out:\d+:\d+$/.test(flowId)&&account(source)&&allocation(target))return result('expense',account(source),category);
   return null;
 }
+
+// Demo descriptions follow the existing numeric-ID convention; user text stays verbatim.
+export function transactionDescription(entry, translate) {
+  if (!entry) return '';
+  return entry.id < 300 || entry.type === 'credit' ? translate(entry.description) : entry.description;
+}
