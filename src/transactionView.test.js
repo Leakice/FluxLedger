@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { navigationPages, transactionFilters, selectTransactionRows } from './transactionView.js';
+import { navigationPages, transactionFilters, selectTransactionRows, flowTransactionFilter } from './transactionView.js';
 import { dictionary } from './locales.js';
 
 const entries = [
@@ -23,10 +23,10 @@ test('navigation has a dedicated repayment destination and all five filters are 
   for (const item of [...navigationPages, ...transactionFilters.map(filter => filter.label)]) assert.ok(dictionary[item]);
 });
 
-test('All shows the complete ledger across accounts, dates, categories and credit snapshots', () => {
+test('All shows the complete ledger across accounts, dates and credit snapshots', () => {
   const original = structuredClone(entries);
   assert.deepEqual(ids(selectTransactionRows(entries)), [7, 6, 9, 4, 3, 2, 5, 8, 1]);
-  assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'all', cardIds: [], category: 'Missing' })), [7, 6, 9, 4, 3, 2, 5, 8, 1]);
+  assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'all', cardIds: null })), [7, 6, 9, 4, 3, 2, 5, 8, 1]);
   assert.deepEqual(entries, original, 'sorting must not mutate the persisted ledger');
 });
 
@@ -37,11 +37,12 @@ test('expense and income retain selected period, account and category filters', 
   assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'expense', category: 'Income' })), []);
   assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'income', category: 'Income' })), [3]);
   assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'income', period: 'year' })), [3,8]);
-  assert.deepEqual(selectTransactionRows(entries, { ...options, kind: 'income', cardIds: [] }), []);
+  assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'income', cardIds: null })), [3]);
+  assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'income', cardIds: [] })), []);
 });
 
 test('credit history includes earlier snapshots through the effective date, not just the latest limit', () => {
-  assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'credit', category: 'Shopping' })), [6,5]);
+  assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'credit' })), [6,5]);
   assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'credit', period: 'year' })), [7,6,5]);
   assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'credit', cardIds: ['b'] })), [9]);
 });
@@ -50,7 +51,7 @@ test('search works in All and typed views for description, translated category a
   const translated = { ...options, translate: value => dictionary[value] || value, accountLabel: id => id === 'a' ? '支付宝 · Alipay' : 'Bank · 1234' };
   assert.deepEqual(ids(selectTransactionRows(entries, { ...translated, search: 'OLD GROCERIES' })), [1]);
   assert.deepEqual(ids(selectTransactionRows(entries, { ...translated, kind: 'expense', search: '餐饮' })), [2]);
-  assert.deepEqual(ids(selectTransactionRows(entries, { ...translated, search: '1234' })), [9,4]);
+  assert.deepEqual(ids(selectTransactionRows(entries, { ...translated, cardIds: null, search: '1234' })), [9,4]);
   assert.deepEqual(ids(selectTransactionRows(entries, { ...translated, kind: 'credit', search: 'ALIPAY' })), [6,5]);
   assert.deepEqual(selectTransactionRows(entries, { ...translated, search: 'not present' }), []);
   assert.deepEqual(selectTransactionRows([], translated), []);
@@ -62,4 +63,61 @@ test('repayment filters match either account and the linked purchase category',(
  const payment={id:'r',type:'repayment',card:'cash',toCard:'credit',purchaseId:'p',category:'Repayments',description:'Payment',date:'2026-09-10',amount:400};
  for(const cardIds of [['cash'],['credit']])assert.deepEqual(selectTransactionRows([purchase,payment],{kind:'repayment',month:'2026-09',cardIds,category:'Shopping'}),[payment]);
  assert.deepEqual(selectTransactionRows([purchase,payment],{kind:'repayment',month:'2026-09',cardIds:['cash'],search:'credit'}),[payment]);
+});
+
+test('All respects accounts while retaining every date', () => {
+  assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'all' })), [7,6,3,2,5,8,1]);
+  assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'all', cardIds: ['b'] })), [9,4]);
+  assert.deepEqual(selectTransactionRows(entries, { ...options, kind: 'all', cardIds: ['missing'] }), []);
+  assert.deepEqual(selectTransactionRows(entries, { kind: 'all', cardIds: [] }), []);
+});
+
+test('All retains repayments matching either paying or receiving account', () => {
+  const payment = { id: 'r', type: 'repayment', card: 'cash', toCard: 'credit', category: 'Repayments', description: 'Payment', date: '2026-09-10' };
+  for (const cardIds of [['cash'], ['credit'], ['cash','credit'], null]) assert.deepEqual(selectTransactionRows([...entries,payment], { kind: 'all', cardIds, search: 'Payment' }), [payment]);
+  assert.deepEqual(selectTransactionRows([payment], { kind: 'all', cardIds: ['a'] }), []);
+});
+
+test('account filter labels have Chinese translations', () => {
+  assert.equal(dictionary['All accounts'], '全部账户');
+  assert.equal(dictionary['Custom selection'], '自定义组合');
+});
+
+test('Sankey nodes and links map to typed filters, preserving or clearing unspecified dimensions',()=>{
+  const cases=[
+    [{flowId:'account:a'},'expense',['a'],undefined],
+    [{flowId:'target:0',category:'Food & Drinks'},'expense',null,'Food & Drinks'],
+    [{flowId:'source:0'},'income',null,'All categories'],
+    [{flowId:'source:1'},'credit',null,'All categories'],
+    [{flowId:'in:0:0',source:'source:0',target:'account:a'},'income',['a'],'All categories'],
+    [{flowId:'in:0:1',source:'source:1',target:'account:a'},'credit',['a'],'All categories'],
+    [{flowId:'out:0:0',source:'account:a',target:'target:0',category:'Food & Drinks'},'expense',['a'],'Food & Drinks'],
+  ];
+  for(const [dataset,recordKind,cardIds,category] of cases)assert.deepEqual(flowTransactionFilter(dataset),{recordKind,cardIds,category});
+});
+test('unallocated capacity and unknown Sankey targets do not navigate',()=>{
+  for(const dataset of [{flowId:'target:1'},{flowId:'out:0:1',source:'account:a',target:'target:1'},{flowId:'target:1',category:'Unallocated capacity'},{flowId:'unknown'},{flowId:'source:2'},{flowId:'account:'},{flowId:'target:unknown',category:'Shopping'},{}])assert.equal(flowTransactionFilter(dataset),null);
+});
+test('Sankey filters retain month and year rules when selecting transactions',()=>{
+  const filter=flowTransactionFilter({flowId:'out:0:0',source:'account:a',target:'target:0',category:'Food & Drinks'});
+  for(const period of ['month','year'])assert.deepEqual(ids(selectTransactionRows(entries,{...filter,kind:filter.recordKind,month:'2026-09',period})),[2]);
+});
+
+test('All applies and clears categories across dates with account and search filters',()=>{
+  const all={...options,kind:'all',cardIds:null};
+  assert.deepEqual(ids(selectTransactionRows(entries,{...all,category:'Shopping'})),[4,1]);
+  assert.deepEqual(ids(selectTransactionRows(entries,{...all,category:'Shopping',cardIds:['a']})),[1]);
+  assert.deepEqual(ids(selectTransactionRows(entries,{...all,category:'Shopping',search:'Clothes'})),[4]);
+  assert.deepEqual(selectTransactionRows(entries,{...all,category:'Missing'}),[]);
+  assert.deepEqual(selectTransactionRows(entries.filter(e=>e.category!=='Shopping'),{...all,category:'Shopping'}),[]);
+  assert.deepEqual(ids(selectTransactionRows(entries,{...all,category:'Income'})),[3,8]);
+  assert.deepEqual(ids(selectTransactionRows(entries,{...all,category:'All categories'})),[7,6,9,4,3,2,5,8,1]);
+});
+test('category filters apply to credit history and linked repayments in All',()=>{
+  assert.deepEqual(selectTransactionRows(entries,{...options,kind:'credit',category:'Shopping'}),[]);
+  assert.deepEqual(ids(selectTransactionRows(entries,{...options,kind:'credit',category:'Credit limit'})),[6,5]);
+  const purchase={id:'p',type:'expense',card:'credit',category:'Shopping',description:'Laptop',date:'2026-08-01'};
+  const payment={id:'r',type:'repayment',card:'cash',toCard:'credit',purchaseId:'p',category:'Repayments',description:'Payment',date:'2026-09-10'};
+  assert.deepEqual(selectTransactionRows([purchase,payment],{kind:'all',cardIds:['cash'],category:'Shopping'}),[payment]);
+  assert.deepEqual(selectTransactionRows([purchase,payment],{kind:'all',category:'Food & Drinks'}),[]);
 });

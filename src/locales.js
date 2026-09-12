@@ -61,6 +61,8 @@ Object.assign(dictionary, {
   "Account color": "账户颜色",
   "Bank / card network": "银行 / 卡组织",
   "Filter account": "筛选账户",
+  "All accounts": "全部账户",
+  "Custom selection": "自定义组合",
   "Account details can change. Linked transactions stay connected.": "修改账户信息后，已有记录仍会关联此账户。",
   "e.g. Everyday account": "例如：日常账户",
   "Alipay": "支付宝",

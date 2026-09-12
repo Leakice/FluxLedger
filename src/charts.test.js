@@ -60,3 +60,22 @@ test('rendered node heights follow exact values across columns and widths',()=>{
     for(const [,value,height] of nodes)assert.ok(Math.abs(Number(height)/Number(value)-scale)<1e-8);
   }
 });
+
+test('allocation nodes and outgoing links carry escaped original categories only for expenses',()=>{
+  const category='Food & "Drinks" <snacks>';
+  const data={...model,cards:model.cards.map(c=>({...c,expenses:c.expenses.map(e=>({...e,category}))}))};
+  for(const width of [320,960]) {
+    const svg=flowChart(data,'Sankey diagram',name=>'Translated '+name,width);
+    for(const id of ['target:0','out:0:0','out:1:0']) {
+      const tag=svg.match(new RegExp('<[^>]*data-flow-id="'+id+'"[^>]*>'))?.[0];
+      assert.ok(tag);
+      assert.ok(tag.includes('data-category="Food &amp; &quot;Drinks&quot; &lt;snacks&gt;"'));
+    }
+    for(const id of ['target:1','out:0:1','out:1:1']) {
+      const tag=svg.match(new RegExp('<[^>]*data-flow-id="'+id+'"[^>]*>'))?.[0];
+      assert.ok(tag);
+      assert.doesNotMatch(tag,/data-category=/);
+    }
+    assert.doesNotMatch(flowChart(data,'Category breakdown',t,width),/data-flow-id|data-category/);
+  }
+});

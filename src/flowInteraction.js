@@ -1,5 +1,5 @@
 // Delegated events survive SVG replacement; dispose before rebinding or unmounting.
-export function bindFlowInteraction(container, translate = value => value) {
+export function bindFlowInteraction(container, translate = value => value, onActivate) {
   if (!container) return () => {};
   const doc = container.ownerDocument;
   const tip = doc.createElement('div');
@@ -47,12 +47,18 @@ export function bindFlowInteraction(container, translate = value => value) {
     }
     position(event);
   }
-  const keydown = event => { if (event.key === 'Escape') clear(); };
+  const activate = event => {
+    const el = event.target.closest?.('[data-flow-id]');
+    if (!onActivate || !el || !container.contains(el)) return;
+    if (event.type === 'keydown') event.preventDefault();
+    onActivate(el.dataset);
+  };
+  const keydown = event => { if (event.key === 'Escape') clear(); else if (event.key === 'Enter' || event.key === ' ') activate(event); };
   // Hit areas are tabindex=0; a plain click must not move focus into the SVG
   // (prevents focus lingering inside the chart). pointerdown above and click
   // semantics are unaffected by cancelling mousedown.
   const mousedown = event => { if (event.target.closest?.('[data-flow-id]')) event.preventDefault(); };
-  const events = { pointermove: show, pointerdown: show, pointerleave: clear, focusin: show, focusout: clear, keydown, mousedown };
+  const events = { pointermove: show, pointerdown: show, pointerleave: clear, focusin: show, focusout: clear, keydown, mousedown, ...(onActivate ? {click: activate} : {}) };
   Object.entries(events).forEach(([name, handler]) => container.addEventListener(name, handler));
   doc.defaultView.addEventListener('scroll', clear, true);
   return () => {
