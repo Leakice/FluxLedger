@@ -79,3 +79,27 @@ test('allocation nodes and outgoing links carry escaped original categories only
     assert.doesNotMatch(flowChart(data,'Category breakdown',t,width),/data-flow-id|data-category/);
   }
 });
+
+
+test('repayment routes use equal heights and show exact aggregated amounts on the flows', async () => {
+  const { repaymentChart } = await import('./charts.js');
+  const { dictionary } = await import('./locales.js');
+  const repayments = [
+    { id: 11, card: 'a', toCard: 'b', amount: 1200, description: 'Desk paid in full' },
+    { id: 15, card: 'a', toCard: 'b', amount: 600, description: 'Laptop first repayment' },
+    { id: 17, card: 'c', toCard: 'd', amount: 560, description: 'Dinner paid in full' },
+    { id: 19, card: 'c', toCard: 'b', amount: 400, description: 'Laptop second repayment' },
+  ];
+  const svg = repaymentChart({ repayments }, key => dictionary[key] || key);
+  const amounts = [...svg.matchAll(/class="repayment-amount"[^>]*>([^<]+)<\/text>/g)].map(match => match[1]);
+  assert.deepEqual(amounts, ['¥1,800.00', '¥560.00', '¥400.00']);
+  const paths = [...svg.matchAll(/<path class="flow-ribbon" d="([^"]+)"/g)];
+  assert.equal(paths.length, 3);
+  for (const [, d] of paths) {
+    const values = [...d.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0]));
+    assert.equal(values[23] - values[11], 32);
+  }
+  assert.match(svg, /流线等宽表示还款路径，金额以标注为准/);
+  assert.match(svg, /笔记本第二笔还款/);
+  assert.doesNotMatch(svg, /Laptop second repayment|NaN|Infinity/);
+});

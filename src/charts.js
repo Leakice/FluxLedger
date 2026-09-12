@@ -1,4 +1,5 @@
 import { accountLast4 } from './ledger.js';
+import { transactionDescription } from './transactionView.js';
 const money = n => '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function details(meta) {
@@ -120,13 +121,13 @@ export function repaymentChart(model, t) {
     if (!group) { group={card:r.card,toCard:r.toCard,source:r.source,target:r.target,records:[],value:0};groups.push(group); }
     group.records.push(r);group.value+=Math.round(r.amount*100);
   }
-  const max = Math.max(...groups.map(g=>g.value));
+
   const svg = '<div class="repayment-scroll"><svg viewBox="0 0 960 '+(groups.length*94+36)+'" role="img" aria-label="'+escapeHtml(t('Repayment flow'))+'"><g font-family="inherit">'+groups.map((g,i)=>{
-    const y=28+i*94, h=8+g.value/max*40;
+    const y=28+i*94, h=32;
     const title=name(g.source,g.card)+' → '+name(g.target,g.toCard)+': '+money(g.value/100);
-    return '<g><title>'+escapeHtml(title)+'</title>'+ribbon(235,y,h,710,y,h,'#25ad9a')+'<path d="M693 '+(y+h/2-5)+' l8 5 -8 5" fill="none" stroke="white" stroke-width="2"/>'+label(14,y,name(g.source,g.card),g.value/100)+label(755,y,name(g.target,g.toCard),g.value/100)+'<text x="450" y="'+(y+h+16)+'" font-size="11" fill="var(--muted)">'+escapeHtml(t('Repayments'))+'</text></g>';
+    return '<g><title>'+escapeHtml(title)+'</title>'+ribbon(235,y,h,710,y,h,'#107f72')+'<text class="repayment-amount" x="472.5" y="'+(y+h/2)+'" text-anchor="middle" dominant-baseline="middle" font-size="13" font-weight="600" fill="white">'+money(g.value/100)+'</text>'+'<path d="M693 '+(y+h/2-5)+' l8 5 -8 5" fill="none" stroke="white" stroke-width="2"/>'+label(14,y,name(g.source,g.card),g.value/100)+label(755,y,name(g.target,g.toCard),g.value/100)+'<text x="450" y="'+(y+h+16)+'" font-size="11" fill="var(--muted)">'+escapeHtml(t('Repayments'))+'</text></g>';
   }).join('')+'</g></svg></div>';
   const mobile='<div class="repayment-mobile">'+groups.map(g=>'<div class="mobile-route"><span>'+escapeHtml(name(g.source,g.card))+'</span><b aria-hidden="true">→</b><span>'+escapeHtml(name(g.target,g.toCard))+'</span><strong>'+money(g.value/100)+'</strong></div>').join('')+'</div>';
-  const details='<div class="repayment-details">'+groups.map(g=>'<details><summary>'+escapeHtml(name(g.source,g.card)+' → '+name(g.target,g.toCard)+' · '+money(g.value/100))+'</summary>'+g.records.map(r=>'<p>'+escapeHtml(r.date+' · '+r.description+' · '+money(r.amount)+' · '+t('Linked credit purchase')+': '+(r.purchase?.description||r.purchaseId)+(r.purchase?' · '+t(r.purchase.status)+' · '+t('Amount due')+' '+money(r.purchase.due):''))+'</p>').join('')+'</details>').join('')+'</div>';
-  return heading+svg+mobile+details+'</section>';
+  const details='<div class="repayment-details">'+groups.map(g=>'<details><summary>'+escapeHtml(name(g.source,g.card)+' → '+name(g.target,g.toCard)+' · '+money(g.value/100))+'</summary>'+g.records.map(r=>'<p>'+escapeHtml(r.date+' · '+transactionDescription(r,t)+' · '+money(r.amount)+' · '+t('Linked credit purchase')+': '+(transactionDescription(r.purchase,t)||r.purchaseId)+(r.purchase?' · '+t(r.purchase.status)+' · '+t('Amount due')+' '+money(r.purchase.due):''))+'</p>').join('')+'</details>').join('')+'</div>';
+  return heading+'<p>'+escapeHtml(t('Equal-width flows show routes; labels show repayment amounts.'))+'</p>'+svg+mobile+details+'</section>';
 }

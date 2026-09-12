@@ -121,3 +121,12 @@ test('category filters apply to credit history and linked repayments in All',()=
   assert.deepEqual(selectTransactionRows([purchase,payment],{kind:'all',cardIds:['cash'],category:'Shopping'}),[payment]);
   assert.deepEqual(selectTransactionRows([purchase,payment],{kind:'all',category:'Food & Drinks'}),[]);
 });
+
+
+test('transaction descriptions translate demo rows consistently while preserving user text', async () => {
+  const { transactionDescription } = await import('./transactionView.js');
+  const translate = text => '中文:' + text;
+  assert.equal(transactionDescription({ id: 19, description: 'Laptop second repayment' }, translate), '中文:Laptop second repayment');
+  assert.equal(transactionDescription({ id: 'user-entry', description: 'Laptop second repayment' }, translate), 'Laptop second repayment');
+  assert.equal(transactionDescription(undefined, translate), '');
+});
