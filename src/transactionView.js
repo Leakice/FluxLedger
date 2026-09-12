@@ -6,10 +6,12 @@ export const transactionFilters = [
   ...entryKinds,
 ];
 
-// All is the complete ledger, independent of Dashboard filters. Typed views
+// cardIds null keeps every account; an explicit empty array selects nothing so the
+// list stays consistent with zeroed stats when no account is checked. All spans
+// dates and categories while respecting the selected accounts. Typed views
 // retain the original period/category rules and effective-date credit history.
 export function selectTransactionRows(entries, {
-  kind = 'all', month = '', period = 'month', cardIds = [],
+  kind = 'all', month = '', period = 'month', cardIds = null,
   category = 'All categories', search = '', translate = value => value,
   accountLabel = id => id,
 } = {}) {
@@ -17,8 +19,9 @@ export function selectTransactionRows(entries, {
   const asOf = kind === 'credit' ? periodEnd(month, period) : '';
   const query = search.toLowerCase();
   return entries.filter(entry => {
+    if (cardIds && !cardIds.includes(entry.card) && !cardIds.includes(entry.toCard)) return false;
     if (kind !== 'all') {
-      if (entry.type !== kind || (!cardIds.includes(entry.card)&&!cardIds.includes(entry.toCard))) return false;
+      if (entry.type !== kind) return false;
       if (kind === 'credit') {
         if (entry.date > asOf) return false;
       } else {

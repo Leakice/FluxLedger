@@ -154,6 +154,8 @@ test('v1 accounts and merged navigation survive saves, deletion, imports and rel
     assert.equal(app.page.value, 'Transactions');
     assert.equal(app.recordKind.value, 'all');
     app.month.value = '2026-09'; app.cards.value = []; app.category.value = 'Missing';
+    assert.deepEqual(app.rows.value.map(row => row.id), [], 'no account selected matches the zeroed stats');
+    app.cards.value = [legacy.id];
     assert.deepEqual(app.rows.value.map(row => row.id), [999]);
     app.search.value = 'Imported'; app.selectRecordKind('expense');
     assert.equal(app.search.value, 'Imported');
