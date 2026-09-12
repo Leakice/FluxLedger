@@ -34,17 +34,20 @@ export function selectTransactionRows(entries, {
 }
 
 // SVG category metadata uses the original name, independent of translated labels.
+// An undefined category keeps the current filter: account nodes inherit the
+// category scope the chart was rendered with, while category-agnostic elements
+// (income and credit nodes and their ribbons) explicitly clear it.
 export function flowTransactionFilter({flowId='',source='',target='',category}={}) {
   const account=id=>/^account:.+$/.test(id)?id.slice(8):null;
   const allocation=id=>/^target:\d+$/.test(id)&&category&&category!=='Unallocated capacity';
-  const result=(recordKind,cardId=null,category=null)=>({recordKind,cardIds:cardId?[cardId]:null,category});
+  const result=(recordKind,cardId,category)=>({recordKind,cardIds:cardId?[cardId]:null,category});
   if(account(flowId))return result('expense',account(flowId));
   if(allocation(flowId))return result('expense',null,category);
-  if(flowId==='source:0')return result('income');
-  if(flowId==='source:1')return result('credit');
+  if(flowId==='source:0')return result('income',null,'All categories');
+  if(flowId==='source:1')return result('credit',null,'All categories');
   if(/^in:\d+:\d+$/.test(flowId)&&account(target)) {
-    if(source==='source:0')return result('income',account(target));
-    if(source==='source:1')return result('credit',account(target));
+    if(source==='source:0')return result('income',account(target),'All categories');
+    if(source==='source:1')return result('credit',account(target),'All categories');
   }
   if(/^out:\d+:\d+$/.test(flowId)&&account(source)&&allocation(target))return result('expense',account(source),category);
   return null;

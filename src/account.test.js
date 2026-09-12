@@ -172,6 +172,11 @@ test('v1 accounts and merged navigation survive saves, deletion, imports and rel
     app.navigate('Dashboard');
     assert.deepEqual([app.page.value, app.period.value, app.month.value, app.category.value, app.recordKind.value, app.search.value], ['Dashboard', 'month', '2026-09', 'All categories', 'all', ''], 'navigating to the overview resets every filter');
     assert.deepEqual(app.cards.value, app.bankCards.value.map(c => c.id));
+    app.cards.value = [legacy.id]; app.category.value = 'Shopping';
+    app.activateFlow({ flowId: 'account:' + legacy.id });
+    assert.deepEqual([app.recordKind.value, app.cards.value, app.category.value], ['expense', [legacy.id], 'Shopping'], 'account nodes keep the selected accounts and the active category');
+    app.activateFlow({ flowId: 'source:0' });
+    assert.deepEqual([app.recordKind.value, app.cards.value, app.category.value], ['income', [legacy.id], 'All categories'], 'aggregate nodes keep the selected accounts and clear the category');
     assert.match(appModule.source, /@click.prevent="navigate\('Dashboard'\)"/);
     app.navigate('unknown-page'); assert.equal(app.page.value, 'Dashboard');
     await nextTick();

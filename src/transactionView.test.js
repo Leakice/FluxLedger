@@ -83,14 +83,14 @@ test('account filter labels have Chinese translations', () => {
   assert.equal(dictionary['Custom selection'], '自定义组合');
 });
 
-test('Sankey nodes and links map to typed account and category filters',()=>{
+test('Sankey nodes and links map to typed filters, preserving or clearing unspecified dimensions',()=>{
   const cases=[
-    [{flowId:'account:a'},'expense',['a'],null],
+    [{flowId:'account:a'},'expense',['a'],undefined],
     [{flowId:'target:0',category:'Food & Drinks'},'expense',null,'Food & Drinks'],
-    [{flowId:'source:0'},'income',null,null],
-    [{flowId:'source:1'},'credit',null,null],
-    [{flowId:'in:0:0',source:'source:0',target:'account:a'},'income',['a'],null],
-    [{flowId:'in:0:1',source:'source:1',target:'account:a'},'credit',['a'],null],
+    [{flowId:'source:0'},'income',null,'All categories'],
+    [{flowId:'source:1'},'credit',null,'All categories'],
+    [{flowId:'in:0:0',source:'source:0',target:'account:a'},'income',['a'],'All categories'],
+    [{flowId:'in:0:1',source:'source:1',target:'account:a'},'credit',['a'],'All categories'],
     [{flowId:'out:0:0',source:'account:a',target:'target:0',category:'Food & Drinks'},'expense',['a'],'Food & Drinks'],
   ];
   for(const [dataset,recordKind,cardIds,category] of cases)assert.deepEqual(flowTransactionFilter(dataset),{recordKind,cardIds,category});

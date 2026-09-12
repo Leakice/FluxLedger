@@ -88,7 +88,7 @@ const linePoints=computed(()=>months.value.map((e,i)=>`${65+i*64},${176-e.expens
 let toastTimer;
 function toast(message){notification.value=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>notification.value='',4000)}
 function navigate(next){page.value=navigationPages.includes(next)?next:'Dashboard';if(page.value==='Dashboard'){resetFilters();report.value='Overview'}}
-function activateFlow(dataset){const filter=flowTransactionFilter(dataset);if(!filter)return;recordKind.value=filter.recordKind;cards.value=filter.cardIds??bankCards.value.map(c=>c.id);category.value=filter.category??'All categories';search.value='';navigate('Transactions')}
+function activateFlow(dataset){const filter=flowTransactionFilter(dataset);if(!filter)return;recordKind.value=filter.recordKind;cards.value=filter.cardIds??cards.value;category.value=filter.category??category.value;search.value='';navigate('Transactions')}
 function selectRecordKind(kind){recordKind.value=recordKind.value===kind?'all':kind;category.value='All categories'}
 function resetFilters(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';recordKind.value='all';search.value=''}
 function reset(){resetFilters();toast('Filters reset')}
