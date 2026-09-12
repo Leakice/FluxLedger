@@ -168,7 +168,10 @@ test('v1 accounts and merged navigation survive saves, deletion, imports and rel
     app.saveEntry({ ...imported, description: 'Imported edit' });
     assert.equal(app.recordKind.value, 'all');
     assert.equal(app.page.value, 'Transactions');
-    app.navigate('Dashboard'); assert.equal(app.page.value, 'Dashboard');
+    app.cards.value = []; app.category.value = 'Shopping'; app.recordKind.value = 'expense'; app.period.value = 'year'; app.search.value = 'Imported';
+    app.navigate('Dashboard');
+    assert.deepEqual([app.page.value, app.period.value, app.month.value, app.category.value, app.recordKind.value, app.search.value], ['Dashboard', 'month', '2026-09', 'All categories', 'all', ''], 'navigating to the overview resets every filter');
+    assert.deepEqual(app.cards.value, app.bankCards.value.map(c => c.id));
     assert.match(appModule.source, /@click.prevent="navigate\('Dashboard'\)"/);
     app.navigate('unknown-page'); assert.equal(app.page.value, 'Dashboard');
     await nextTick();

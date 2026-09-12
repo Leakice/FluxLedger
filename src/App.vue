@@ -87,10 +87,11 @@ const chartMax=computed(()=>Math.max(...months.value.map(e=>Math.max(e.income,e.
 const linePoints=computed(()=>months.value.map((e,i)=>`${65+i*64},${176-e.expense/chartMax.value*145}`).join(' '));
 let toastTimer;
 function toast(message){notification.value=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>notification.value='',4000)}
-function navigate(next){page.value=navigationPages.includes(next)?next:'Dashboard';if(page.value==='Dashboard')report.value='Overview'}
+function navigate(next){page.value=navigationPages.includes(next)?next:'Dashboard';if(page.value==='Dashboard'){resetFilters();report.value='Overview'}}
 function activateFlow(dataset){const filter=flowTransactionFilter(dataset);if(!filter)return;recordKind.value=filter.recordKind;cards.value=filter.cardIds??bankCards.value.map(c=>c.id);category.value=filter.category??'All categories';search.value='';navigate('Transactions')}
 function selectRecordKind(kind){recordKind.value=recordKind.value===kind?'all':kind;category.value='All categories'}
-function reset(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';toast('Filters reset')}
+function resetFilters(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';recordKind.value='all';search.value=''}
+function reset(){resetFilters();toast('Filters reset')}
 function openForm(type='expense',entry=null){formError.value='';entryDialog.value.open(type==='all'?'expense':type,(page.value==='Repayment records'?repaymentMonth.value:month.value)+'-10',entry)}
 function openRepayment(entry){openForm('repayment',{id:null,description:'Repayment · '+entry.description,purchaseId:entry.id,toCard:entry.card,card:bankCards.value.find(c=>c.id!==entry.card)?.id||'',amount:purchaseFor(entry.id)?.due||'',date:asOf.value < entry.date ? entry.date : month.value+'-'+String(Math.max(10,entry.date.startsWith(month.value)?Number(entry.date.slice(-2)):1)).padStart(2,'0')})}
 function loanCardFor(borrower, currentCardId) {

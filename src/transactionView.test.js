@@ -23,7 +23,7 @@ test('navigation has a dedicated repayment destination and all five filters are 
   for (const item of [...navigationPages, ...transactionFilters.map(filter => filter.label)]) assert.ok(dictionary[item]);
 });
 
-test('All shows the complete ledger across accounts, dates, categories and credit snapshots', () => {
+test('All shows the complete ledger across accounts, dates and credit snapshots', () => {
   const original = structuredClone(entries);
   assert.deepEqual(ids(selectTransactionRows(entries)), [7, 6, 9, 4, 3, 2, 5, 8, 1]);
   assert.deepEqual(ids(selectTransactionRows(entries, { ...options, kind: 'all', cardIds: null })), [7, 6, 9, 4, 3, 2, 5, 8, 1]);
