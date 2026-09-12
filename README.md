@@ -12,7 +12,7 @@
 
 </div>
 
-![FluxLedger 浅色总览：桑基资金流、账户筛选与财务报表](docs/images/dashboard-light.png)
+![FluxLedger 浅色总览：桑基资金流、账户筛选与财务报表](docs/images/dashboard-light.webp)
 
 ## 让账目有迹可循
 
@@ -33,20 +33,20 @@
 
 EN / ZH 与日夜模式随时切换，选择会保存在当前浏览器。图表使用项目内的 SVG 实现，应用运行时无需加载外部字体或图表 CDN。
 
-![FluxLedger 深色总览](docs/images/dashboard-dark.png)
+![FluxLedger 深色总览](docs/images/dashboard-dark.webp)
 
 ### 每笔还款，都有来处与去向
 
 还款页展示「付款账户 → 信用账户」的流线，并提供关联消费与还款明细。账户余额和未还负债按所选期间截止日计算。
 
-![FluxLedger 信用还款页面](docs/images/repayments.png)
+![FluxLedger 信用还款页面](docs/images/repayments.webp)
 
 ### 小屏幕，也能完整记账
 
 窄屏采用可折叠筛选、交易卡片与单列表单。资金图保留可读尺寸，可在图内横向滚动；界面尊重系统的减少动态效果设置。
 
 <p align="center">
-  <img src="docs/images/transactions-mobile.png" alt="390 像素宽度下的移动端交易记录" width="320">
+  <img src="docs/images/transactions-mobile.webp" alt="390 像素宽度下的移动端交易记录" width="320">
 </p>
 
 <sub>总览与手机截图使用默认演示账本；还款截图使用包含信用消费与还款的演示场景。默认月份为 2026 年 9 月，金额统一使用人民币（¥）。</sub>

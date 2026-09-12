@@ -47,6 +47,14 @@ function importData() {
   if (fileInput.value) fileInput.value.value = '';
 }
 
+// dialog.close() refocuses the pre-open trigger and Chromium paints a stale
+// :focus-visible ring on it; pointer clicks (detail > 0) blur that restored
+// focus, keyboard-activated clicks (detail 0) and Esc's cancel path keep it.
+function closeFromPointer(event) {
+  dialog.value.close();
+  if (event?.detail > 0) document.activeElement?.blur?.();
+}
+
 defineExpose({ open });
 </script>
 
@@ -54,7 +62,7 @@ defineExpose({ open });
   <dialog ref="dialog" class="edit-dialog data-dialog">
     <div class="card-heading">
       <div><span class="eyebrow">{{ t('Backup & restore') }}</span><h2>{{ t('Data management') }}</h2></div>
-      <button type="button" class="icon" :aria-label="t('Close')" @click="dialog.close()">×</button>
+      <button type="button" class="icon" :aria-label="t('Close')" @click="closeFromPointer">×</button>
     </div>
     <p class="form-note">{{ t('Move your ledger between browsers with a complete data backup.') }}</p>
     <div class="data-actions">

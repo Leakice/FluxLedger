@@ -48,7 +48,11 @@ export function bindFlowInteraction(container, translate = value => value) {
     position(event);
   }
   const keydown = event => { if (event.key === 'Escape') clear(); };
-  const events = { pointermove: show, pointerdown: show, pointerleave: clear, focusin: show, focusout: clear, keydown };
+  // Hit areas are tabindex=0; a plain click must not move focus into the SVG
+  // (prevents focus lingering inside the chart). pointerdown above and click
+  // semantics are unaffected by cancelling mousedown.
+  const mousedown = event => { if (event.target.closest?.('[data-flow-id]')) event.preventDefault(); };
+  const events = { pointermove: show, pointerdown: show, pointerleave: clear, focusin: show, focusout: clear, keydown, mousedown };
   Object.entries(events).forEach(([name, handler]) => container.addEventListener(name, handler));
   doc.defaultView.addEventListener('scroll', clear, true);
   return () => {
