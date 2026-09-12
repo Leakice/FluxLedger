@@ -59,3 +59,5 @@ dialog[open]{animation:dialog-in .3s var(--ease-spring)}dialog[open]::backdrop{a
 #repayment-records .table-wrap :is(th,td):nth-child(1) { white-space: nowrap; }
 .desktop-transactions :is(th,td):nth-child(6),
 #repayment-records .table-wrap :is(th,td):nth-child(4) { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; width: 160px; min-width: 160px; }
+
+#flow-chart [data-flow-id] { cursor: pointer; }

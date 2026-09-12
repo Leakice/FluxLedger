@@ -5,7 +5,7 @@ import { dictionary } from './locales';
 import { flowChart, repaymentChart } from './charts';
 import { bindFlowInteraction } from './flowInteraction';
 import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger, inferCreditExpenses } from './ledger';
-import { navigationPages, transactionFilters, selectTransactionRows } from './transactionView';
+import { navigationPages, transactionFilters, selectTransactionRows, flowTransactionFilter } from './transactionView';
 import SourceChart from './components/SourceChart.vue';
 import FrequencyChart from './components/FrequencyChart.vue';
 import EntryDialog from './components/EntryDialog.vue';
@@ -74,7 +74,7 @@ const flow=computed(()=>flowChart(flowModel.value,chartType.value,t,flowWidth.va
 let disposeFlow=()=>{};
 watch([flowContainer,flow],()=>{
   disposeFlow();
-  disposeFlow=bindFlowInteraction(flowContainer.value,t);
+  disposeFlow=bindFlowInteraction(flowContainer.value,t,activateFlow);
 },{flush:'post'});
 watch([flowModel,chartType,language],()=>{
   if(flowContainer.value && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -87,9 +87,11 @@ const chartMax=computed(()=>Math.max(...months.value.map(e=>Math.max(e.income,e.
 const linePoints=computed(()=>months.value.map((e,i)=>`${65+i*64},${176-e.expense/chartMax.value*145}`).join(' '));
 let toastTimer;
 function toast(message){notification.value=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>notification.value='',4000)}
-function navigate(next){page.value=navigationPages.includes(next)?next:'Dashboard';if(page.value==='Dashboard')report.value='Overview'}
+function navigate(next){page.value=navigationPages.includes(next)?next:'Dashboard';if(page.value==='Dashboard'){resetFilters();report.value='Overview'}}
+function activateFlow(dataset){const filter=flowTransactionFilter(dataset);if(!filter)return;recordKind.value=filter.recordKind;cards.value=filter.cardIds??cards.value;category.value=filter.category??category.value;search.value='';navigate('Transactions')}
 function selectRecordKind(kind){recordKind.value=recordKind.value===kind?'all':kind;category.value='All categories'}
-function reset(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';toast('Filters reset')}
+function resetFilters(){period.value='month';month.value='2026-09';cards.value=bankCards.value.map(c=>c.id);category.value='All categories';recordKind.value='all';search.value=''}
+function reset(){resetFilters();toast('Filters reset')}
 function openForm(type='expense',entry=null){formError.value='';entryDialog.value.open(type==='all'?'expense':type,(page.value==='Repayment records'?repaymentMonth.value:month.value)+'-10',entry)}
 function openRepayment(entry){openForm('repayment',{id:null,description:'Repayment · '+entry.description,purchaseId:entry.id,toCard:entry.card,card:bankCards.value.find(c=>c.id!==entry.card)?.id||'',amount:purchaseFor(entry.id)?.due||'',date:asOf.value < entry.date ? entry.date : month.value+'-'+String(Math.max(10,entry.date.startsWith(month.value)?Number(entry.date.slice(-2)):1)).padStart(2,'0')})}
 function loanCardFor(borrower, currentCardId) {
@@ -176,8 +178,8 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.set
         </div>
       </div>
       <div v-if="recordKind==='credit'" class="credit-explanation"><span>◇</span>{{ t('The latest limit replaces the previous limit. It is not income.') }}<span class="muted">{{ t('As of') }} {{ asOf }}</span></div>
-      <div class="list-toolbar"><input v-model="search" type="search" :placeholder="t('Search transactions…')"><select class="mobile-account-filter" v-model="accountFilter" :aria-label="t('Filter account')"><option value="">{{ t('All accounts') }}</option><option v-if="accountFilter==='__custom__'" value="__custom__" disabled>{{ t('Custom selection') }} ({{ cards.length }})</option><option v-for="card in bankCards" :key="card.id" :value="card.id">{{ cardName(card.id) }}</option></select><span>{{ t(activeRecordFilter.label) }} · {{ rows.length }} {{ language==='zh'?'笔记录':'records' }} · {{ accountFilterLabel }}</span></div>
-      <div class="table-wrap desktop-transactions"><table><thead><tr><th v-for="item in ['Description','Type','Category','Date','Account','Amount','Actions']" :key="item"><select v-if="item==='Account'" class="account-column-filter" v-model="accountFilter" :aria-label="t('Filter account')"><option value="">{{ t('All accounts') }}</option><option v-if="accountFilter==='__custom__'" value="__custom__" disabled>{{ t('Custom selection') }} ({{ cards.length }})</option><option v-for="card in bankCards" :key="card.id" :value="card.id">{{ cardName(card.id) }}</option></select><template v-else>{{ t(item) }}</template></th></tr></thead>
+      <div class="list-toolbar"><input v-model="search" type="search" :placeholder="t('Search transactions…')"><select class="mobile-transaction-filter" v-model="accountFilter" :aria-label="t('Filter account')"><option value="">{{ t('All accounts') }}</option><option v-if="accountFilter==='__custom__'" value="__custom__" disabled>{{ t('Custom selection') }} ({{ cards.length }})</option><option v-for="card in bankCards" :key="card.id" :value="card.id">{{ cardName(card.id) }}</option></select><select class="mobile-transaction-filter" v-model="category" :aria-label="t('Categories')"><option v-for="item in filterCategories" :key="item" :value="item">{{ t(item) }}</option></select><span>{{ t(activeRecordFilter.label) }} · {{ rows.length }} {{ language==='zh'?'笔记录':'records' }} · {{ accountFilterLabel }}{{ category!=='All categories'?' · '+t(category):'' }}</span></div>
+      <div class="table-wrap desktop-transactions"><table><thead><tr><th v-for="item in ['Description','Type','Category','Date','Account','Amount','Actions']" :key="item"><select v-if="item==='Account'" class="transaction-column-filter" v-model="accountFilter" :aria-label="t('Filter account')"><option value="">{{ t('All accounts') }}</option><option v-if="accountFilter==='__custom__'" value="__custom__" disabled>{{ t('Custom selection') }} ({{ cards.length }})</option><option v-for="card in bankCards" :key="card.id" :value="card.id">{{ cardName(card.id) }}</option></select><select v-else-if="item==='Category'" class="transaction-column-filter" v-model="category" :aria-label="t('Categories')"><option v-for="item in filterCategories" :key="item" :value="item">{{ t(item) }}</option></select><template v-else>{{ t(item) }}</template></th></tr></thead>
         <TransitionGroup name="row" tag="tbody"><tr v-for="entry in rows" :key="entry.id"><td>{{ entry.id<300||entry.type==='credit'?t(entry.description):entry.description }}<small v-if="entry.onCredit&&purchaseFor(entry.id)" class="entry-detail">{{ t(purchaseFor(entry.id).status) }} · {{ t('Amount due') }} {{ money(purchaseFor(entry.id).due) }}</small></td><td><span class="type-badge" :class="entry.type">{{ t(entry.onCredit?'Credit purchase':entryKinds.find(k=>k.type===entry.type)?.label) }}</span></td><td>{{ t(entry.category) }}</td><td>{{ entry.date }}</td><td>{{ cardName(entry.card) }}<template v-if="entry.type==='repayment'"> → {{ cardName(entry.toCard) }}<small class="entry-detail">{{ t('Linked credit purchase') }}: {{ entries.find(p=>p.id===entry.purchaseId)?.description }}</small></template></td><td :class="entry.type">{{ entry.type==='credit'?'':entry.type==='income'?'+':'−' }}{{ money(entry.amount) }}</td><td><div class="row-actions"><button v-if="entry.onCredit&&purchaseFor(entry.id)?.due>0" class="row-edit" @click="openRepayment(entry)">{{ t('Repay credit') }}</button><button class="row-edit" :aria-label="t('Edit transaction')+' '+entry.description" @click="openForm(entry.type,entry)">✎ {{ t('Edit') }}</button><button class="row-delete" :aria-label="t('Delete transaction')+' '+entry.description" @click="remove(entry)">×</button></div></td></tr></TransitionGroup>
         <tbody v-if="!rows.length"><tr><td colspan="7" class="empty-state">{{ t('No transactions found.') }}<button class="text-button empty-add" @click="openForm(recordKind)">＋ {{ t(activeRecordFilter.action) }}</button></td></tr></tbody>
       </table></div>

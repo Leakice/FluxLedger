@@ -234,7 +234,8 @@ body:has(dialog[open]) { overflow: hidden; }
 #repayment-records .account-balances { margin: 24px 0; }
 @media(max-width:600px) { #repayment-records { padding: 20px 16px; } #repayment-records > .section-heading { flex-wrap: wrap; } #repayment-records h1 { font-size: 28px; } }
 
-/* Keep the account filter in the column heading; card layouts have no table header. */
-.mobile-account-filter { display: none; }
-.account-column-filter { background-color: transparent; border: 0; border-radius: 0; padding: 0 24px 0 0; font: inherit; color: inherit; max-width: 220px; text-overflow: ellipsis; }
-@media (max-width: 640px) { .mobile-account-filter { display: block; max-width: 100%; } }
+/* Account and category filters live in the table headings; card layouts have no
+   table header, so mobile shows toolbar selects instead. */
+.mobile-transaction-filter { display: none; }
+.transaction-column-filter { background-color: transparent; border: 0; border-radius: 0; padding: 0 24px 0 0; font: inherit; color: inherit; max-width: 220px; text-overflow: ellipsis; }
+@media (max-width: 640px) { .mobile-transaction-filter { display: block; max-width: 100%; } }

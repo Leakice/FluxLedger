@@ -3,10 +3,10 @@ const money = n => '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 2, 
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function details(meta) {
   if (!meta) return '';
-  return ' tabindex="0" data-flow-id="'+escapeHtml(meta.id)+'" data-source="'+escapeHtml(meta.source || '')+'" data-target="'+escapeHtml(meta.target || '')+'" data-title="'+escapeHtml(meta.title)+'" data-value="'+meta.value+'" data-total="'+meta.total+'" aria-label="'+escapeHtml(meta.title+': '+money(meta.value))+'"';
+  return ' tabindex="0" data-flow-id="'+escapeHtml(meta.id)+'" data-source="'+escapeHtml(meta.source || '')+'" data-target="'+escapeHtml(meta.target || '')+'" data-title="'+escapeHtml(meta.title)+'" data-value="'+meta.value+'" data-total="'+meta.total+'"'+(meta.category != null?' data-category="'+escapeHtml(meta.category)+'"':'')+' aria-label="'+escapeHtml(meta.title+': '+money(meta.value))+'"';
 }
-function interactiveNode(html,id,title,value,total) {
-  return '<g class="flow-interactive-node"'+details({id,title,value,total})+'>'+html+'</g>';
+function interactiveNode(html,id,title,value,total,category) {
+  return '<g class="flow-interactive-node"'+details({id,title,value,total,category})+'>'+html+'</g>';
 }
 export function ribbon(x1,y1,h1,x2,y2,h2,color,meta) {
   const curve=(x2-x1)*.5, r=meta ? 0 : Math.min(h1/2,h2/2,10,Math.max(0,(x2-x1)/4));
@@ -94,14 +94,14 @@ function capacityChart(model,chartType,t,width=960) {
       if(!funded)return;
       const ch=funded*safeScale;
       const th=funded*safeScale;
-      paths+=ribbon(xs[1]+nodeWidth-8,cs[i].y+used,ch,xs[2]+8,ts[j].y+targetUsed[j],th,'url(#expense-flow)',{id:'out:'+i+':'+j,source:'account:'+card.id,target:'target:'+j,title:t(card.name)+' → '+t(target.name),value:funded,total:capacity});
+      paths+=ribbon(xs[1]+nodeWidth-8,cs[i].y+used,ch,xs[2]+8,ts[j].y+targetUsed[j],th,'url(#expense-flow)',{id:'out:'+i+':'+j,source:'account:'+card.id,target:'target:'+j,title:t(card.name)+' → '+t(target.name),value:funded,total:capacity,category:target.name==='Unallocated capacity'?undefined:target.name});
       used+=ch;targetUsed[j]+=th;
     });
   });
   return '<svg class="sankey-chart" viewBox="0 0 '+canvasWidth+' '+height+'" role="img" aria-label="'+escapeHtml(t('Income and credit limit flow through accounts to expenses'))+'"><defs><linearGradient id="income-flow"><stop stop-color="#8a5cf6" stop-opacity=".55"/><stop offset="1" stop-color="#5997fa" stop-opacity=".26"/></linearGradient><linearGradient id="credit-flow"><stop stop-color="#627084" stop-opacity=".45"/><stop offset="1" stop-color="#5189d6" stop-opacity=".3"/></linearGradient><linearGradient id="expense-flow"><stop stop-color="#2483ff" stop-opacity=".48"/><stop offset="1" stop-color="#39c4d9" stop-opacity=".28"/></linearGradient></defs><g font-family="inherit"><g class="flow-column-labels" font-size="'+(canvasWidth<480?9:11)+'" fill="var(--muted)">'+['1. Source','2. Accounts','3. Allocation'].map((name,i)=>'<text text-anchor="'+(i===0?'start':i===2?'end':'middle')+'" x="'+(xs[i]+(i===0?0:i===2?nodeWidth:nodeWidth/2))+'" y="18">'+escapeHtml(t(name))+'</text>').join('')+'</g>'+paths+
     [income,credit].map((v,i)=>v>0?interactiveNode(insideNode(xs[0],ss[i],nodeWidth,i?'#343e4f':'#8855f5',t(i?'Credit limit':'Income'),v,capacity)+outsideLabel(xs[0]-8,ss[i],t(i?'Credit limit':'Income'),'left',padL-12),'source:'+i,t(i?'Credit limit':'Income'),v,capacity):'').join('')+
     cards.map((c,i)=>{const name=t(c.name)+(accountLast4(c)?' • '+accountLast4(c):'');return c.capacity>0?interactiveNode(insideNode(xs[1],cs[i],nodeWidth,c.color,name,c.capacity,capacity),'account:'+c.id,name,c.capacity,capacity):''}).join('')+
-    targets.map((g,i)=>g.value>0?interactiveNode(insideNode(xs[2],ts[i],nodeWidth,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',t(g.name),g.value,capacity)+outsideLabel(xs[2]+nodeWidth+8,ts[i],t(g.name),'right',padR-12),'target:'+i,t(g.name),g.value,capacity):'').join('')+'</g></svg>';
+    targets.map((g,i)=>g.value>0?interactiveNode(insideNode(xs[2],ts[i],nodeWidth,g.name==='Unallocated capacity'?'#a0b7c5':'#24b6d2',t(g.name),g.value,capacity)+outsideLabel(xs[2]+nodeWidth+8,ts[i],t(g.name),'right',padR-12),'target:'+i,t(g.name),g.value,capacity,g.name==='Unallocated capacity'?undefined:g.name):'').join('')+'</g></svg>';
 }
 
 // Keep actual repayment cash flows separate from the capacity illustration above.
