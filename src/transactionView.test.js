@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { navigationPages, transactionFilters, selectTransactionRows } from './transactionView.js';
+import { navigationPages, transactionFilters, selectTransactionRows, flowTransactionFilter } from './transactionView.js';
 import { dictionary } from './locales.js';
 
 const entries = [
@@ -81,4 +81,24 @@ test('All retains repayments matching either paying or receiving account', () =>
 test('account filter labels have Chinese translations', () => {
   assert.equal(dictionary['All accounts'], '全部账户');
   assert.equal(dictionary['Custom selection'], '自定义组合');
+});
+
+test('Sankey nodes and links map to typed account and category filters',()=>{
+  const cases=[
+    [{flowId:'account:a'},'expense',['a'],null],
+    [{flowId:'target:0',category:'Food & Drinks'},'expense',null,'Food & Drinks'],
+    [{flowId:'source:0'},'income',null,null],
+    [{flowId:'source:1'},'credit',null,null],
+    [{flowId:'in:0:0',source:'source:0',target:'account:a'},'income',['a'],null],
+    [{flowId:'in:0:1',source:'source:1',target:'account:a'},'credit',['a'],null],
+    [{flowId:'out:0:0',source:'account:a',target:'target:0',category:'Food & Drinks'},'expense',['a'],'Food & Drinks'],
+  ];
+  for(const [dataset,recordKind,cardIds,category] of cases)assert.deepEqual(flowTransactionFilter(dataset),{recordKind,cardIds,category});
+});
+test('unallocated capacity and unknown Sankey targets do not navigate',()=>{
+  for(const dataset of [{flowId:'target:1'},{flowId:'out:0:1',source:'account:a',target:'target:1'},{flowId:'target:1',category:'Unallocated capacity'},{flowId:'unknown'},{flowId:'source:2'},{flowId:'account:'},{flowId:'target:unknown',category:'Shopping'},{}])assert.equal(flowTransactionFilter(dataset),null);
+});
+test('Sankey filters retain month and year rules when selecting transactions',()=>{
+  const filter=flowTransactionFilter({flowId:'out:0:0',source:'account:a',target:'target:0',category:'Food & Drinks'});
+  for(const period of ['month','year'])assert.deepEqual(ids(selectTransactionRows(entries,{...filter,kind:filter.recordKind,month:'2026-09',period})),[2]);
 });

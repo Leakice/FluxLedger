@@ -32,3 +32,20 @@ export function selectTransactionRows(entries, {
     return (entry.description + ' ' + translate(entry.category) + ' ' + entry.category + ' ' + accountLabel(entry.card)+' '+(entry.toCard?accountLabel(entry.toCard):'')).toLowerCase().includes(query);
   }).sort((a, b) => b.date.localeCompare(a.date) || (Number(b.id)-Number(a.id)||String(b.id).localeCompare(String(a.id))));
 }
+
+// SVG category metadata uses the original name, independent of translated labels.
+export function flowTransactionFilter({flowId='',source='',target='',category}={}) {
+  const account=id=>/^account:.+$/.test(id)?id.slice(8):null;
+  const allocation=id=>/^target:\d+$/.test(id)&&category&&category!=='Unallocated capacity';
+  const result=(recordKind,cardId=null,category=null)=>({recordKind,cardIds:cardId?[cardId]:null,category});
+  if(account(flowId))return result('expense',account(flowId));
+  if(allocation(flowId))return result('expense',null,category);
+  if(flowId==='source:0')return result('income');
+  if(flowId==='source:1')return result('credit');
+  if(/^in:\d+:\d+$/.test(flowId)&&account(target)) {
+    if(source==='source:0')return result('income',account(target));
+    if(source==='source:1')return result('credit',account(target));
+  }
+  if(/^out:\d+:\d+$/.test(flowId)&&account(source)&&allocation(target))return result('expense',account(source),category);
+  return null;
+}
