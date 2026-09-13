@@ -13,21 +13,42 @@ export const LEDGER_DOCUMENT_MAX_BYTES = 1000000;
 const isPlainObject = value =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const TRANSACTION_TYPES = ['expense', 'income', 'repayment', 'credit'];
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+// 前端无条件下必读的字段（渲染与统计计算直接 .startsWith/.toLocaleString 等），
+// 缺失或类型不对会让整个账本页崩溃，必须在文档入口拒绝：
+// 交易记录：id/type/amount/date/card/category/description；账户记录：id/name/color/network/accountType。
+const isValidTransactionRecord = item =>
+  isPlainObject(item)
+  && ((typeof item.id === 'string' && item.id.length > 0) || typeof item.id === 'number')
+  && TRANSACTION_TYPES.includes(item.type)
+  && typeof item.amount === 'number' && Number.isFinite(item.amount)
+  && typeof item.date === 'string' && DATE_PATTERN.test(item.date)
+  && typeof item.card === 'string' && item.card.length > 0
+  && typeof item.category === 'string' && item.category.length > 0
+  && typeof item.description === 'string';
+
+const isValidCardRecord = item =>
+  isPlainObject(item)
+  && typeof item.id === 'string' && item.id.length > 0
+  && typeof item.name === 'string' && item.name.length > 0
+  && typeof item.color === 'string'
+  && typeof item.network === 'string' && item.network.length > 0
+  && typeof item.accountType === 'string' && item.accountType.length > 0;
+
 const isValidIdList = value =>
   Array.isArray(value) && value.every(item => typeof item === 'string' && item.length > 0);
 
-const isValidObjectList = value =>
-  Array.isArray(value) && value.every(isPlainObject);
-
-// 严格校验：恰好三键的普通对象；transactions/cards 元素必须是普通对象（数组里混入
-// null/标量会让前端统计计算抛 TypeError），hiddenBuiltInCardIds 是非空字符串 id 表。
-// 未知键与非法元素一律拒绝（fail closed），防止 schema 静默漂移或前端崩溃。
+// 严格校验：恰好三键的普通对象；transactions/cards 为上述记录形状的数组，
+// hiddenBuiltInCardIds 是非空字符串 id 表。未知键与非法元素一律拒绝（fail closed），
+// 防止 schema 静默漂移或前端崩溃。
 export function validateLedgerDocument(value) {
   if (!isPlainObject(value)) return false;
   const keys = Object.keys(value);
   if (keys.length !== LEDGER_DOCUMENT_KEYS.length) return false;
-  return isValidObjectList(value.transactions)
-    && isValidObjectList(value.cards)
+  return Array.isArray(value.transactions) && value.transactions.every(isValidTransactionRecord)
+    && Array.isArray(value.cards) && value.cards.every(isValidCardRecord)
     && isValidIdList(value.hiddenBuiltInCardIds);
 }
 

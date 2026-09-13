@@ -6,6 +6,13 @@ import {
 } from './ledger-document.js';
 
 const validDocument = () => ({ transactions: [], cards: [], hiddenBuiltInCardIds: ['online-alipay'] });
+const fullTransaction = overrides => ({
+  id: 't1', type: 'expense', amount: 5, date: '2026-09-01',
+  card: '4329', category: 'Food & Drinks', description: 'Coffee', ...overrides,
+});
+const fullCard = overrides => ({
+  id: 'c1', name: 'Everyday card', color: '#f4cf35', network: 'Visa', accountType: 'Savings card', ...overrides,
+});
 
 test('a document is exactly the three array keys', () => {
   assert.equal(validateLedgerDocument(validDocument()), true);
@@ -35,11 +42,33 @@ test('validation rejects array entries that would crash the frontend calculation
   assert.equal(validateLedgerDocument({ transactions: ['x'], cards: [], hiddenBuiltInCardIds: [] }), false, 'scalar entry');
   assert.equal(validateLedgerDocument({ transactions: [[]], cards: [], hiddenBuiltInCardIds: [] }), false, 'nested array entry');
   assert.equal(validateLedgerDocument({ transactions: [], cards: [], hiddenBuiltInCardIds: [null] }), false, 'id lists take non-empty strings only');
+  assert.equal(validateLedgerDocument({ transactions: [], cards: [null], hiddenBuiltInCardIds: [] }), false, 'null card');
+});
+
+test('transactions missing any unconditionally-read field are rejected', () => {
+  // 复现用例：缺 date 的记录此前通过校验，前端 e.date.startsWith 直接抛 TypeError。
+  assert.equal(validateLedgerDocument({ transactions: [{ id: 'bad', type: 'expense' }], cards: [], hiddenBuiltInCardIds: [] }), false);
+  assert.equal(validateLedgerDocument({ transactions: [fullTransaction({ date: '2026/09/01' })], cards: [], hiddenBuiltInCardIds: [] }), false, 'date shape');
+  assert.equal(validateLedgerDocument({ transactions: [fullTransaction({ type: 'transfer' })], cards: [], hiddenBuiltInCardIds: [] }), false, 'unknown type');
+  assert.equal(validateLedgerDocument({ transactions: [fullTransaction({ amount: '5' })], cards: [], hiddenBuiltInCardIds: [] }), false, 'amount type');
+  assert.equal(validateLedgerDocument({ transactions: [fullTransaction({ card: '' })], cards: [], hiddenBuiltInCardIds: [] }), false, 'empty card');
+  assert.equal(validateLedgerDocument({ transactions: [fullTransaction({ description: undefined })], cards: [], hiddenBuiltInCardIds: [] }), false, 'description must be a string');
   assert.equal(
-    validateLedgerDocument({ transactions: [{ id: 't1' }], cards: [{ id: 'c1' }], hiddenBuiltInCardIds: ['online-wechat'] }),
+    validateLedgerDocument({ transactions: [fullTransaction({ id: 42 }), fullTransaction()], cards: [fullCard()], hiddenBuiltInCardIds: [] }),
     true,
-    'object lists take plain objects; id lists take non-empty strings',
+    'numeric ids (legacy seed) and complete records pass',
   );
+  assert.equal(
+    validateLedgerDocument({ transactions: [fullTransaction({ onCredit: true, purchaseId: 'p1' })], cards: [fullCard({ last4: '1001', noLast4: true })], hiddenBuiltInCardIds: [] }),
+    true,
+    'extra domain fields stay allowed; optional card fields stay optional',
+  );
+});
+
+test('cards missing render-critical fields are rejected', () => {
+  assert.equal(validateLedgerDocument({ transactions: [], cards: [{ id: 'c1' }], hiddenBuiltInCardIds: [] }), false);
+  assert.equal(validateLedgerDocument({ transactions: [], cards: [fullCard({ name: '' })], hiddenBuiltInCardIds: [] }), false, 'empty name');
+  assert.equal(validateLedgerDocument({ transactions: [], cards: [fullCard({ color: '#fff', network: 1 })], hiddenBuiltInCardIds: [] }), false, 'network type');
 });
 
 test('buildLedgerDocument produces exactly the stored shape', () => {

@@ -64,9 +64,17 @@ export async function PUT(request: Request) {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     return Response.json({ error: "request body must be an object" }, { status: 400, headers: NO_STORE });
   }
-  const body = payload as { data?: unknown; baseVersion?: unknown };
+  const body = payload as { data?: unknown; baseVersion?: unknown; expectedUserId?: unknown };
   if (!validateBaseVersion(body.baseVersion)) {
     return Response.json({ error: "baseVersion must be a non-negative integer" }, { status: 400, headers: NO_STORE });
+  }
+  if (typeof body.expectedUserId !== "string" || !body.expectedUserId || body.expectedUserId.length > 128) {
+    return Response.json({ error: "expectedUserId must be a string" }, { status: 400, headers: NO_STORE });
+  }
+  // 一致性检查（非归属判断）：客户端快照的账号必须与本次请求的认证身份一致，
+  // 否则说明 whoami 之后、写库之前会话已切换（旧页面竞态）。归属永远只取认证头。
+  if (body.expectedUserId !== user.userId) {
+    return Response.json({ error: "identity mismatch" }, { status: 403, headers: NO_STORE });
   }
   if (!validateLedgerDocument(body.data)) {
     return Response.json(

@@ -1,6 +1,6 @@
 // 云端会话数据层的行为测试：登录态检测（含身份未知）、账户隔离命名空间、
-// 草稿保护（GET 不得丢弃工作副本）、防抖 PUT、乐观锁冲突、身份切换保护与退出清理。
-// 跑在 test-setup.mjs 的 happy-dom 环境里。
+// 草稿基版本保护（不 rebase、不被 GET 丢弃）、flush 快照范围、乐观锁冲突备份与恢复、
+// 身份切换保护与退出清理。跑在 test-setup.mjs 的 happy-dom 环境里。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { uidHash } from './uidHash.js';
@@ -9,8 +9,8 @@ import {
   loadHiddenBuiltInCardIds, saveHiddenBuiltInCardIds, loadLanguage, saveLanguage,
 } from './local.js';
 import {
-  bootstrapCloud, currentSession, onCloudEvent, hasPendingDraft, flushNow,
-  signOutLocalCleanup, __resetForTest,
+  bootstrapCloud, currentSession, onCloudEvent, hasPendingDraft, hasConflictBackup,
+  getConflictBackup, restoreConflictBackup, flushNow, signOutLocalCleanup, __resetForTest,
 } from './cloud.js';
 
 const USER_A = 'user-account-a-0001';
@@ -35,18 +35,19 @@ const pack = ({ status = 200, body = {} }) => ({
   ok: status >= 200 && status < 300, status, json: async () => body,
 });
 
-// 路由式假 API：whoami/ledger 各自可按调用次序返回不同结果；返回 null/undefined 表示网络失败。
+// 路由式假 API：whoami/ledger 各自可按调用次序返回不同结果（handler 可为 async，
+// 用于门控慢响应）；返回 null/undefined 表示网络失败。
 function fakeApi({ whoami, ledger } = {}) {
   const calls = [];
   const fetch = async (url, options = {}) => {
     calls.push({ url, options });
     if (url === '/api/whoami') {
-      const response = typeof whoami === 'function' ? whoami(calls.filter(c => c.url === '/api/whoami').length) : whoami;
+      const response = typeof whoami === 'function' ? await whoami(calls.filter(c => c.url === '/api/whoami').length) : whoami;
       if (!response) throw new Error('whoami network failure (simulated)');
       return pack(response);
     }
     if (url === '/api/ledger') {
-      const response = typeof ledger === 'function' ? ledger(calls.filter(c => c.url === '/api/ledger').length, options) : ledger;
+      const response = typeof ledger === 'function' ? await ledger(calls.filter(c => c.url === '/api/ledger').length, options) : ledger;
       if (!response) throw new Error('ledger network failure (simulated)');
       return pack(response);
     }
@@ -56,10 +57,16 @@ function fakeApi({ whoami, ledger } = {}) {
   return { fetch, calls, whoamiCalls: () => count('/api/whoami'), ledgerCalls: () => count('/api/ledger') };
 }
 
-const asUser = userId => ({ status: 200, body: { authenticated: true, userId } });
-const cloudDocument = transactions => ({
-  transactions, cards: [{ id: 'c9', name: 'Cloud card' }], hiddenBuiltInCardIds: ['online-alipay'],
+// 符合文档校验的完整交易记录（生产中由录入对话框产出这些字段）。
+const entry = (id, overrides = {}) => ({
+  id, type: 'expense', card: 'c9', amount: 1, date: '2026-01-01',
+  category: 'Other', description: id, ...overrides,
 });
+const cloudCard = { id: 'c9', name: 'Cloud card', color: '#123456', network: 'Visa', accountType: 'Savings card' };
+const cloudDocument = transactions => ({
+  transactions, cards: [cloudCard], hiddenBuiltInCardIds: ['online-alipay'],
+});
+const asUser = userId => ({ status: 200, body: { authenticated: true, userId } });
 
 test.beforeEach(() => { __resetForTest(); });
 test.afterEach(() => { __resetForTest(); });
@@ -72,26 +79,24 @@ test('guest bootstrap keeps every read and write on the original keys', async ()
   const session = await bootstrapCloud({ fetch });
 
   assert.equal(session.mode, 'guest');
-  saveTransactions([{ id: 't1' }]);
-  assert.deepEqual(loadTransactions(), [{ id: 't1' }]);
+  saveTransactions([{ ...entry('t1') }]);
+  assert.deepEqual(loadTransactions(), [{ ...entry('t1') }]);
   assert.ok(storage.getItem(KEYS.transactions), 'original transactions key written');
   assert.ok(storage.keys().every(key => !key.startsWith('cloud-cache-')), 'no namespaced keys in guest mode');
 });
 
-test('an undetectable identity is unknown mode, never a silent guest fallback', async () => {
+test('an undetectable identity is unknown mode with a boot flag, never a silent guest fallback', async () => {
   const storage = mapStorage();
   globalThis.localStorage = storage;
   const api = fakeApi({ whoami: null }); // 网络失败 ×3（重试用尽）
-  const events = [];
-  onCloudEvent(event => events.push(event));
 
   const session = await bootstrapCloud({ fetch: api.fetch, retryDelay: 1 });
 
   assert.equal(session.mode, 'unknown');
-  assert.deepEqual(events, ['session-unknown']);
+  assert.equal(session.boot, 'unknown', 'boot state is a flag for the UI to surface after mount');
   assert.equal(api.ledgerCalls(), 0, 'unknown identity never touches cloud data');
-  saveTransactions([{ id: 'local-edit' }]);
-  assert.deepEqual(loadTransactions(), [{ id: 'local-edit' }]);
+  saveTransactions([{ ...entry('local-edit') }]);
+  assert.deepEqual(loadTransactions(), [{ ...entry('local-edit') }]);
   assert.ok(storage.getItem(KEYS.transactions), 'degraded to original keys, explicitly announced');
   assert.ok(storage.keys().every(key => !key.startsWith('cloud-cache-')));
 });
@@ -99,17 +104,18 @@ test('an undetectable identity is unknown mode, never a silent guest fallback', 
 test('signed-in bootstrap hydrates the account namespace and leaves original keys alone', async () => {
   const storage = mapStorage({ [KEYS.transactions]: '[{"id":"guest-note"}]' });
   globalThis.localStorage = storage;
-  const { fetch } = fakeApi({ whoami: asUser(USER_A), ledger: { body: { data: cloudDocument([{ id: 'cloud-t1' }]), version: 3 } } });
+  const remote = [entry('cloud-t1')];
+  const { fetch } = fakeApi({ whoami: asUser(USER_A), ledger: { body: { data: cloudDocument(remote), version: 3 } } });
 
   const session = await bootstrapCloud({ fetch });
 
   assert.equal(session.mode, 'cloud');
   assert.equal(session.userId, USER_A);
   assert.equal(session.version, 3);
-  assert.deepEqual(loadTransactions(), [{ id: 'cloud-t1' }], 'cloud document served through the namespace');
+  assert.deepEqual(loadTransactions(), remote, 'cloud document served through the namespace');
   assert.equal(JSON.parse(storage.getItem(nsKey(USER_A, KEYS.transactions)))[0].id, 'cloud-t1');
   assert.equal(storage.getItem(KEYS.transactions), '[{"id":"guest-note"}]', 'guest key untouched');
-  saveCards([{ id: 'c1' }]);
+  saveCards([{ id: 'c1', name: 'C', color: '#000000', network: 'Visa', accountType: 'Savings card' }]);
   assert.ok(storage.getItem(nsKey(USER_A, KEYS.cards)), 'card writes go to the namespace');
   assert.equal(storage.getItem(KEYS.cards), null, 'original cards key untouched');
   saveHiddenBuiltInCardIds(['online-wechat']);
@@ -133,117 +139,174 @@ test('an empty cloud ledger initializes an explicit empty document, never the de
   assert.equal(storage.getItem(nsKey(USER_A, KEYS.hiddenBuiltInCardIds)), '[]');
 });
 
-test('data changes mark a draft immediately and debounce into one PUT with the current baseVersion', async () => {
+test('data changes mark a draft with the current base and debounce into one PUT', async () => {
   globalThis.localStorage = mapStorage();
+  const remote = [entry('cloud-t1')];
   const { fetch, calls } = fakeApi({
     whoami: asUser(USER_A),
-    ledger: (count, options) => (count === 1
-      ? { body: { data: cloudDocument([{ id: 'cloud-t1' }]), version: 3 } }
+    ledger: (count) => (count === 1
+      ? { body: { data: cloudDocument(remote), version: 3 } }
       : { body: { version: 4 } }),
   });
   await bootstrapCloud({ fetch, debounce: 5 });
 
   const events = [];
   onCloudEvent(event => events.push(event));
-  saveTransactions([{ id: 'local-t1' }]);
+  saveTransactions([entry('local-t1')]);
   assert.equal(hasPendingDraft(), true, 'the draft marker is set before any network round-trip');
-  saveCards([{ id: 'c1' }, { id: 'c2' }]);
+  saveCards([{ id: 'c1', name: 'C', color: '#000000', network: 'Visa', accountType: 'Savings card' }]);
   await sleep(30);
 
   const put = calls.find(call => call.options.method === 'PUT');
   assert.ok(put, 'a PUT was issued');
   const payload = JSON.parse(put.options.body);
   assert.equal(payload.baseVersion, 3);
-  assert.deepEqual(payload.data.transactions, [{ id: 'local-t1' }]);
+  assert.equal(payload.expectedUserId, USER_A, 'the server can verify identity within the same request');
+  assert.deepEqual(payload.data.transactions, [entry('local-t1')]);
   assert.deepEqual(payload.data.hiddenBuiltInCardIds, ['online-alipay']);
   assert.equal(currentSession().version, 4, 'version tracks the server response');
   assert.equal(hasPendingDraft(), false, 'a successful save clears the draft marker');
   assert.deepEqual(events, [], 'successful save is silent');
-  assert.deepEqual(loadTransactions(), [{ id: 'local-t1' }]);
+  assert.deepEqual(loadTransactions(), [entry('local-t1')]);
 });
 
-test('a 409 reloads the cloud document, emits conflict and never overwrites the cloud', async () => {
+test('a 409 backs up the working copy, reloads the cloud version and offers recovery', async () => {
   globalThis.localStorage = mapStorage();
+  const remote = [entry('cloud-t1')];
   const { fetch, calls } = fakeApi({
     whoami: asUser(USER_A),
     ledger: (count) => (count === 1
       ? { body: { data: cloudDocument([]), version: 3 } }
       : count === 2
-        ? { status: 409, body: { error: 'version conflict', currentVersion: 9, currentData: cloudDocument([{ id: 'cloud-newer' }]) } }
-        : { body: { data: cloudDocument([{ id: 'cloud-newer' }]), version: 9 } }),
+        ? { status: 409, body: { error: 'version conflict', currentVersion: 9, currentData: cloudDocument([entry('cloud-newer')]) } }
+        : { body: { data: cloudDocument([entry('cloud-newer')]), version: 9 } }),
   });
   await bootstrapCloud({ fetch, debounce: 5 });
 
   const events = [];
   onCloudEvent(event => events.push(event));
-  saveTransactions([{ id: 'my-unsaved' }]);
+  const unsaved = [entry('my-unsaved')];
+  saveTransactions(unsaved);
   await sleep(30);
 
   const put = calls.find(call => call.options.method === 'PUT');
   assert.equal(JSON.parse(put.options.body).baseVersion, 3);
   const refresh = calls[calls.length - 1];
   assert.equal(refresh.options.method, undefined, 'conflict triggers a GET refresh, not a retry PUT');
-  assert.deepEqual(loadTransactions(), [{ id: 'cloud-newer' }], 'working copy now mirrors the cloud');
+  assert.deepEqual(loadTransactions(), [entry('cloud-newer')], 'working copy now mirrors the cloud');
   assert.equal(currentSession().version, 9);
-  assert.equal(hasPendingDraft(), false, 'conflict resolution supersedes the draft explicitly');
+  assert.equal(hasPendingDraft(), false);
+  assert.equal(hasConflictBackup(), true, 'the only unsaved copy is preserved as a restorable backup');
+  assert.deepEqual(getConflictBackup().doc.transactions, unsaved);
+  assert.equal(getConflictBackup().baseVersion, 3);
   assert.deepEqual(events, ['conflict']);
+
+  // 显式恢复：备份写回工作副本（基版本=云端当前版本），下一次 flush 上传。
+  assert.equal(restoreConflictBackup(), true);
+  assert.deepEqual(loadTransactions(), unsaved);
+  assert.equal(hasPendingDraft(), true);
 });
 
-test('offline boot initializes an empty ledger, keeps edits, and syncs them on a later save', async () => {
+test('an offline draft keeps its original base and conflicts instead of rebasing over newer data', async () => {
   globalThis.localStorage = mapStorage();
-  const { fetch, calls } = fakeApi({
+  const { fetch } = fakeApi({
     whoami: asUser(USER_A),
-    ledger: (count) => (count === 1
-      ? null // 启动 GET：离线
-      : count === 2
-        ? { body: { data: cloudDocument([{ id: 'cloud-t1' }]), version: 7 } } // 建立版本
-        : { body: { version: 8 } }), // 草稿上传
+    ledger: { body: { data: cloudDocument([]), version: 1 } },
   });
-  const events = [];
-  onCloudEvent(event => events.push(event));
+  await bootstrapCloud({ fetch, debounce: 60000 }); // 长防抖：草稿只标记、不上传
+  saveTransactions([entry('my-draft')]);
+  assert.equal(hasPendingDraft(), true);
+
+  // 远端前进到 v2；页面刷新后重新引导。
+  const api2 = fakeApi({
+    whoami: asUser(USER_A),
+    ledger: (count, options) => (options.method === 'PUT'
+      ? (JSON.parse(options.body).baseVersion === 1
+        ? { status: 409, body: { currentVersion: 2, currentData: cloudDocument([entry('newer-remote')]) } }
+        : { body: { version: 3 } })
+      : { body: { data: cloudDocument([entry('newer-remote')]), version: 2 } }),
+  });
+  const session = await bootstrapCloud({ fetch: api2.fetch, debounce: 5 });
+
+  assert.equal(session.version, 1, 'boot adopts the draft base, never the latest cloud version');
+  assert.equal(api2.ledgerCalls(), 0, 'no boot GET when a draft exists');
+  assert.deepEqual(loadTransactions(), [entry('my-draft')], 'the draft survives the reload');
+
+  await flushNow();
+
+  const put = api2.calls.find(call => call.options.method === 'PUT');
+  assert.equal(JSON.parse(put.options.body).baseVersion, 1, 'the draft uploads with its original base');
+  assert.deepEqual(loadTransactions(), [entry('newer-remote')], 'the server rejected the stale base; cloud version wins');
+  assert.equal(hasConflictBackup(), true);
+  assert.deepEqual(getConflictBackup().doc.transactions, [entry('my-draft')]);
+
+  assert.equal(restoreConflictBackup(), true);
+  await flushNow();
+  const puts = api2.calls.filter(call => call.options.method === 'PUT');
+  assert.equal(JSON.parse(puts[1].options.body).baseVersion, 2, 'the restored copy uploads against the cloud base');
+  assert.equal(hasPendingDraft(), false);
+});
+
+test('an unknown-base draft over cloud data becomes a conflict, never a silent overwrite', async () => {
+  globalThis.localStorage = mapStorage();
+  const { fetch } = fakeApi({
+    whoami: asUser(USER_A),
+    ledger: (count, options) => {
+      if (count === 1) return null; // 启动 GET：离线
+      if (count === 2) return { body: { data: cloudDocument([entry('cloud-t1')]), version: 7 } }; // 建立基线
+      if (options.method === 'PUT') return { body: { version: 8 } }; // 恢复后的上传
+      return { body: { data: cloudDocument([entry('cloud-t1')]), version: 7 } }; // 冲突重读
+    },
+  });
 
   const session = await bootstrapCloud({ fetch, debounce: 5 });
 
   assert.equal(session.version, null, 'version unknown after offline boot');
+  assert.equal(session.boot, 'offline');
   assert.deepEqual(loadTransactions(), [], 'explicit empty document, never demo seed');
-  assert.deepEqual(events, ['offline-boot']);
 
-  saveTransactions([{ id: 'offline-edit' }]);
-  await sleep(30);
+  saveTransactions([entry('offline-edit')]);
+  await flushNow();
 
-  assert.ok(events.includes('save-failed'), 'the unsynced modification reports failure, not success');
-  assert.ok(!calls.some(call => call.options.method === 'PUT'), 'never PUT without a known baseVersion');
-  assert.deepEqual(loadTransactions(), [{ id: 'offline-edit' }], 'establishing the version must not discard the working copy');
+  assert.equal(hasConflictBackup(), true, 'unknown-base draft over cloud data is treated as a conflict');
+  assert.deepEqual(getConflictBackup().doc.transactions, [entry('offline-edit')]);
+  assert.deepEqual(loadTransactions(), [entry('cloud-t1')], 'the cloud version fills the working copy');
   assert.equal(currentSession().version, 7);
-
-  saveTransactions([{ id: 'offline-edit-2' }]);
-  await sleep(30);
-  const put = calls.find(call => call.options.method === 'PUT');
-  assert.ok(put, 'the next explicit save uploads the kept working copy');
-  assert.equal(JSON.parse(put.options.body).baseVersion, 7);
-  assert.equal(currentSession().version, 8);
   assert.equal(hasPendingDraft(), false);
+
+  assert.equal(restoreConflictBackup(), true);
+  await flushNow();
+  assert.equal(currentSession().version, 8, 'the restored copy uploads against the established base');
 });
 
-test('an unsynced draft survives a page reload (boot keeps the working copy, no blind GET overwrite)', async () => {
+test('an edit during a slow PUT is uploaded by a follow-up flush and keeps its draft until synced', async () => {
   globalThis.localStorage = mapStorage();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
   const { fetch, calls } = fakeApi({
-    whoami: () => asUser(USER_A),
-    ledger: (count, options) => (options.method === 'PUT' ? null : { body: { data: cloudDocument([]), version: 3 } }),
+    whoami: asUser(USER_A),
+    ledger: (count, options) => {
+      if (count === 1) return { body: { data: cloudDocument([]), version: 3 } };
+      if (options.method !== 'PUT') return { body: { data: cloudDocument([]), version: 3 } };
+      if (count === 2) return gate.then(() => ({ body: { version: 4 } })); // 慢 PUT
+      return { body: { version: 5 } };
+    },
   });
   await bootstrapCloud({ fetch, debounce: 5 });
-  saveTransactions([{ id: 'my-draft' }]);
-  await sleep(30);
-  assert.equal(hasPendingDraft(), true, 'failed PUT keeps the draft marker');
 
-  // 模拟整页刷新后的重新引导（同一存储、同一身份）。
-  const api2 = fakeApi({ whoami: asUser(USER_A), ledger: { body: { data: cloudDocument([]), version: 99 } } });
-  const session = await bootstrapCloud({ fetch: api2.fetch, debounce: 5 });
+  saveTransactions([entry('first-edit')]);
+  await sleep(15); // 第一次 flush 进入慢 PUT
+  saveTransactions([entry('first-edit'), entry('edit-during-put')]);
+  await sleep(15); // 第二个定时器在在途期间触发 → 排队补跑
+  release();
+  await sleep(40);
 
-  assert.equal(session.mode, 'cloud');
-  assert.equal(session.version, null, 'draft exists: the version stays unknown until the next save');
-  assert.deepEqual(loadTransactions(), [{ id: 'my-draft' }], 'the draft is not replaced by the cloud document');
-  assert.equal(api2.ledgerCalls(), 0, 'no boot GET when a draft exists');
+  const puts = calls.filter(call => call.options.method === 'PUT');
+  assert.equal(puts.length, 2, 'the follow-up flush uploads the late edit');
+  assert.deepEqual(JSON.parse(puts[1].options.body).data.transactions, [entry('first-edit'), entry('edit-during-put')]);
+  assert.equal(JSON.parse(puts[1].options.body).baseVersion, 4);
+  assert.equal(hasPendingDraft(), false, 'the marker clears only after the latest edits reached the cloud');
+  assert.deepEqual(loadTransactions(), [entry('first-edit'), entry('edit-during-put')]);
 });
 
 test('a changed browser identity aborts the save and never writes A’s copy under B', async () => {
@@ -256,7 +319,7 @@ test('a changed browser identity aborts the save and never writes A’s copy und
 
   const events = [];
   onCloudEvent(event => events.push(event));
-  saveTransactions([{ id: 'stale-a-copy' }]);
+  saveTransactions([entry('stale-a-copy')]);
   await sleep(40);
 
   assert.ok(!calls.some(call => call.options.method === 'PUT'), 'the stale working copy is never submitted');
@@ -275,7 +338,7 @@ test('an unverifiable identity during save fails closed and keeps the draft', as
 
   const events = [];
   onCloudEvent(event => events.push(event));
-  saveTransactions([{ id: 'held-back' }]);
+  saveTransactions([entry('held-back')]);
   await sleep(60);
 
   assert.ok(!calls.some(call => call.options.method === 'PUT'), 'fail closed: no write under an unknown identity');
@@ -293,31 +356,31 @@ test('a session that ends between boot and save is treated as an identity change
 
   const events = [];
   onCloudEvent(event => events.push(event));
-  saveTransactions([{ id: 'after-signout' }]);
+  saveTransactions([entry('after-signout')]);
   await sleep(40);
 
   assert.ok(!calls.some(call => call.options.method === 'PUT'));
   assert.deepEqual(events, ['session-changed']);
 });
 
-test('sign-out cleanup clears the account namespace including the draft marker', async () => {
+test('sign-out cleanup clears the account namespace including draft and conflict metadata', async () => {
   const storage = mapStorage();
   globalThis.localStorage = storage;
   const { fetch } = fakeApi({
     whoami: asUser(USER_A),
-    ledger: { body: { data: cloudDocument([{ id: 'cloud-t1' }]), version: 2 } },
+    ledger: { body: { data: cloudDocument([entry('cloud-t1')]), version: 2 } },
   });
   await bootstrapCloud({ fetch });
-  saveTransactions([{ id: 'local-unsaved' }]);
+  saveTransactions([entry('local-unsaved')]);
   assert.equal(hasPendingDraft(), true);
 
   storage.setItem(KEYS.transactions, '[{"id":"guest-local"}]');
   signOutLocalCleanup();
 
   assert.equal(currentSession().mode, 'guest');
-  assert.ok(storage.keys().every(key => !key.startsWith('cloud-cache-')), 'namespace cache and draft marker cleared');
+  assert.ok(storage.keys().every(key => !key.startsWith('cloud-cache-')), 'namespace cache and metadata cleared');
   assert.equal(storage.getItem(KEYS.transactions), '[{"id":"guest-local"}]', 'guest data untouched');
-  saveTransactions([{ id: 'post-signout' }]);
+  saveTransactions([entry('post-signout')]);
   assert.ok(storage.getItem(KEYS.transactions) && !storage.getItem(nsKey(USER_A, KEYS.transactions)));
 });
 
@@ -330,7 +393,7 @@ test('flushNow resolves only after the working copy reached the cloud (or gave u
       : options.method === 'PUT' ? { body: { version: 6 } } : { body: { data: cloudDocument([]), version: 5 } }),
   });
   await bootstrapCloud({ fetch, debounce: 60000 }); // 防抖长到不会自动触发
-  saveTransactions([{ id: 'sign-out-guard' }]);
+  saveTransactions([entry('sign-out-guard')]);
   assert.equal(hasPendingDraft(), true);
 
   await flushNow();

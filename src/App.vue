@@ -6,7 +6,7 @@ import { flowChart, repaymentChart } from './charts';
 import { bindFlowInteraction } from './flowInteraction';
 import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger, inferCreditExpenses } from './ledger';
 import { loadTransactions, saveTransactions, loadCards, saveCards, loadHiddenBuiltInCardIds, saveHiddenBuiltInCardIds, loadLanguage, saveLanguage, loadTheme, saveTheme } from './storage/local';
-import { currentSession, onCloudEvent, signOutLocalCleanup, hasPendingDraft, flushNow } from './storage/cloud';
+import { currentSession, onCloudEvent, signOutLocalCleanup, hasPendingDraft, hasConflictBackup, flushNow, restoreConflictBackup } from './storage/cloud';
 import { maskedUserId } from './storage/uidHash';
 import { navigationPages, transactionFilters, selectTransactionRows, flowTransactionFilter, transactionDescription } from './transactionView';
 import SourceChart from './components/SourceChart.vue';
@@ -35,6 +35,7 @@ const accountMenuOpen=ref(false);
 const maskedId=()=>maskedUserId(cloudSession.userId||'');
 // 冲突后从命名空间缓存重载工作副本：缓存已被云端版本覆盖，内存必须同步跟随，
 // 否则下一次编辑会用新版本号把过期集合推回云端、覆盖另一设备的数据。
+// 被取代的工作副本已由云端层备份（conflict-doc），可通过 toast 按钮或数据管理恢复。
 function reloadWorkingCopy(){
   hiddenBuiltInCardIds.value=loadHiddenBuiltInCardIds();
   bankCards.value=withBuiltInAccountCards(loadCards(defaultCards),hiddenBuiltInCardIds.value);
@@ -42,12 +43,12 @@ function reloadWorkingCopy(){
   cards.value=bankCards.value.map(c=>c.id);
   deleted.value=null;
 }
+const CONFLICT_NOTICE='Sync conflict — cloud data reloaded. Your unsaved changes were kept as a local backup.';
+const conflictBackupAvailable=ref(false);
 // 云端事件 → UI 反应（云端模块只发事件类型，文案与动作留在 UI 层）。
 const cloudActions={
   'save-failed':()=>'Save failed',
-  'conflict':()=>{reloadWorkingCopy();return 'Sync conflict — cloud data reloaded. Your unsaved changes were replaced by the cloud version.';},
-  'offline-boot':()=>'Offline: showing cached data. It will sync when you are back online.',
-  'session-unknown':()=>'Sign-in check failed. Running in local mode; changes will not reach the cloud.'
+  'conflict':()=>{reloadWorkingCopy();conflictBackupAvailable.value=true;return CONFLICT_NOTICE;}
 };
 function handleCloudEvent(event){
   if(event==='session-changed'){window.location.reload();return;}
@@ -56,14 +57,18 @@ function handleCloudEvent(event){
 }
 const offCloudEvent=onCloudEvent(handleCloudEvent);
 onBeforeUnmount(()=>{offCloudEvent();});
-// 退出登录：有未同步草稿时先尝试同步再走平台退出路由；同步失败则保留本账户
-// 命名空间缓存（云端数据不动），绝不静默丢弃未保存内容。
+function restoreConflictCopy(){
+  if(restoreConflictBackup()){reloadWorkingCopy();conflictBackupAvailable.value=false;toast('Conflict copy restored. It will sync to the cloud.');}
+}
+// 退出登录：有未同步草稿或未恢复冲突副本时，先尝试同步（草稿）并保留命名空间
+// （云端数据不动），绝不静默丢弃未保存内容。
 async function signOut(event){
   accountMenuOpen.value=false;
-  if(hasPendingDraft()){
+  if(hasPendingDraft()||hasConflictBackup()){
     event.preventDefault();
     await flushNow();
     if(hasPendingDraft())toast('Save failed');
+    if(hasPendingDraft()||hasConflictBackup())conflictBackupAvailable.value=hasConflictBackup();
     else signOutLocalCleanup();
     window.location.href='/signout-with-chatgpt?return_to=%2F';
     return;
@@ -131,6 +136,10 @@ const chartMax=computed(()=>Math.max(...months.value.map(e=>Math.max(e.income,e.
 const linePoints=computed(()=>months.value.map((e,i)=>`${65+i*64},${176-e.expense/chartMax.value*145}`).join(' '));
 let toastTimer;
 function toast(message){notification.value=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>notification.value='',4000)}
+// 启动期状态在挂载后才可见（bootstrap 先于订阅）：读取 boot 旗标补提示。
+if(cloudSession.boot==='offline')toast('Offline: showing cached data. It will sync when you are back online.');
+else if(cloudSession.boot==='unknown')toast('Sign-in check failed. Running in local mode; changes will not reach the cloud.');
+else if(cloudSession.mode==='cloud'&&hasConflictBackup())conflictBackupAvailable.value=true;
 function navigate(next){page.value=navigationPages.includes(next)?next:'Dashboard';if(page.value==='Dashboard'){resetFilters();report.value='Overview'}}
 function activateFlow(dataset){const filter=flowTransactionFilter(dataset);if(!filter)return;recordKind.value=filter.recordKind;cards.value=filter.cardIds??cards.value;category.value=filter.category??category.value;search.value='';navigate('Transactions')}
 function selectRecordKind(kind){recordKind.value=recordKind.value===kind?'all':kind;category.value='All categories'}
@@ -255,6 +264,6 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);saveTheme(value)
   <footer><img class="footer-brand" src="/assets/logo-mini.svg" alt="QYNT" width="105" height="119"/><span>{{ t('A clear view of your financial world.') }}</span><a class="footer-contact" href="mailto:leakice@qq.com,2632364603@qq.com">{{ t('Contact us') }}</a></footer>
   <EntryDialog :entries="entries" :error="formError" ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
   <CardDialog ref="cardDialog" :t="t" @save="saveCard" @remove="removeCard"/>
-  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :cloud-mode="cloudSession.mode==='cloud'" :t="t" @import="importData" @notify="toast"/>
-  <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button></div>
+  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :cloud-mode="cloudSession.mode==='cloud'" :conflict-available="conflictBackupAvailable" :t="t" @import="importData" @notify="toast" @restore-conflict="restoreConflictCopy"/>
+  <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button><button v-if="notification===CONFLICT_NOTICE&&conflictBackupAvailable" class="undo" @click="restoreConflictCopy">{{ t('Restore my changes') }}</button></div>
 </template>
