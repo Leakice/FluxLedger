@@ -6,19 +6,32 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "dev": "vite",
-    "start": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "test": "node --test --import ./scripts/test-setup.mjs src/ledger.test.js src/dataTransfer.test.js src/entryDialog.test.js src/account.test.js src/transactionView.test.js src/charts.test.js src/seed.test.js src/storage/local.test.js src/app.test.js"
+    "dev": "vinext dev",
+    "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
+    "build": "vinext build",
+    "db:generate": "drizzle-kit generate",
+    "test": "node --test --import ./scripts/test-setup.mjs src/ledger.test.js src/dataTransfer.test.js src/entryDialog.test.js src/account.test.js src/transactionView.test.js src/charts.test.js src/seed.test.js src/storage/local.test.js src/app.test.js src/storage/uidHash.test.js src/storage/cloud.test.js app/ledger-document.test.js"
   },
   "dependencies": {
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
     "vue": "^3.5.42"
   },
   "type": "module",
   "devDependencies": {
+    "@cloudflare/vite-plugin": "1.54.8",
+    "@cloudflare/workers-types": "5.20260911.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
     "@vitejs/plugin-vue": "^6.0.8",
+    "drizzle-kit": "0.31.10",
+    "drizzle-orm": "^0.45.2",
     "happy-dom": "^20.14.5",
+    "react-server-dom-webpack": "19.2.6",
+    "typescript": "5.9.3",
+    "vinext": "1.0.0-beta.5",
     "vite": "^8.2.2",
     "wrangler": "^4.131.1"
   }

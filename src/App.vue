@@ -6,6 +6,8 @@ import { flowChart, repaymentChart } from './charts';
 import { bindFlowInteraction } from './flowInteraction';
 import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger, inferCreditExpenses } from './ledger';
 import { loadTransactions, saveTransactions, loadCards, saveCards, loadHiddenBuiltInCardIds, saveHiddenBuiltInCardIds, loadLanguage, saveLanguage, loadTheme, saveTheme } from './storage/local';
+import { currentSession, onCloudEvent, signOutLocalCleanup, hasPendingDraft, hasConflictBackup, flushNow, restoreConflictBackup } from './storage/cloud';
+import { maskedUserId } from './storage/uidHash';
 import { navigationPages, transactionFilters, selectTransactionRows, flowTransactionFilter, transactionDescription } from './transactionView';
 import SourceChart from './components/SourceChart.vue';
 import FrequencyChart from './components/FrequencyChart.vue';
@@ -27,6 +29,52 @@ const accountFilter=computed({get:()=>allAccountsSelected.value?'':cards.value.l
 const accountFilterLabel=computed(()=>allAccountsSelected.value?cards.value.length+'/'+bankCards.value.length:cards.value.length===1?cardName(cards.value[0]):t('Custom selection')+' ('+cards.value.length+')');
 const formError=ref('');
 const notification=ref(''), deleted=ref(null), filtersOpen=ref(false);
+// 登录态在 main.js 挂载前已确定（bootstrapCloud），此处只读快照；登录/退出都是整页导航。
+const cloudSession=currentSession();
+const accountMenuOpen=ref(false);
+const maskedId=()=>maskedUserId(cloudSession.userId||'');
+// 冲突后从命名空间缓存重载工作副本：缓存已被云端版本覆盖，内存必须同步跟随，
+// 否则下一次编辑会用新版本号把过期集合推回云端、覆盖另一设备的数据。
+// 被取代的工作副本已由云端层备份（conflict-doc），可通过 toast 按钮或数据管理恢复。
+function reloadWorkingCopy(){
+  hiddenBuiltInCardIds.value=loadHiddenBuiltInCardIds();
+  bankCards.value=withBuiltInAccountCards(loadCards(defaultCards),hiddenBuiltInCardIds.value);
+  entries.value=inferCreditExpenses(loadTransactions([]),bankCards.value);
+  cards.value=bankCards.value.map(c=>c.id);
+  deleted.value=null;
+}
+const CONFLICT_NOTICE='Sync conflict — cloud data reloaded. Your unsaved changes were kept as a local backup.';
+const conflictBackupAvailable=ref(false);
+// 云端事件 → UI 反应（云端模块只发事件类型，文案与动作留在 UI 层）。
+const cloudActions={
+  'save-failed':()=>'Save failed',
+  'conflict':()=>{reloadWorkingCopy();conflictBackupAvailable.value=true;return CONFLICT_NOTICE;}
+};
+function handleCloudEvent(event){
+  if(event==='session-changed'){window.location.reload();return;}
+  const action=cloudActions[event];
+  if(action)toast(action());
+}
+const offCloudEvent=onCloudEvent(handleCloudEvent);
+onBeforeUnmount(()=>{offCloudEvent();});
+function restoreConflictCopy(){
+  if(restoreConflictBackup()){reloadWorkingCopy();conflictBackupAvailable.value=false;toast('Conflict copy restored. It will sync to the cloud.');}
+}
+// 退出登录：有未同步草稿或未恢复冲突副本时，先尝试同步（草稿）并保留命名空间
+// （云端数据不动），绝不静默丢弃未保存内容。
+async function signOut(event){
+  accountMenuOpen.value=false;
+  if(hasPendingDraft()||hasConflictBackup()){
+    event.preventDefault();
+    await flushNow();
+    if(hasPendingDraft())toast('Save failed');
+    if(hasPendingDraft()||hasConflictBackup())conflictBackupAvailable.value=hasConflictBackup();
+    else signOutLocalCleanup();
+    window.location.href='/signout-with-chatgpt?return_to=%2F';
+    return;
+  }
+  signOutLocalCleanup();
+}
 const asOf=computed(()=>periodEnd(month.value,period.value));
 const cardName=id=>{const card=bankCards.value.find(c=>c.id===id);return card?t(card.name)+(accountLast4(card)?' · '+accountLast4(card):''):id};
 const limitFor=id=>creditLimit(entries.value,id,asOf.value);
@@ -88,6 +136,10 @@ const chartMax=computed(()=>Math.max(...months.value.map(e=>Math.max(e.income,e.
 const linePoints=computed(()=>months.value.map((e,i)=>`${65+i*64},${176-e.expense/chartMax.value*145}`).join(' '));
 let toastTimer;
 function toast(message){notification.value=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>notification.value='',4000)}
+// 启动期状态在挂载后才可见（bootstrap 先于订阅）：读取 boot 旗标补提示。
+if(cloudSession.boot==='offline')toast('Offline: showing cached data. It will sync when you are back online.');
+else if(cloudSession.boot==='unknown')toast('Sign-in check failed. Running in local mode; changes will not reach the cloud.');
+else if(cloudSession.mode==='cloud'&&hasConflictBackup())conflictBackupAvailable.value=true;
 function navigate(next){page.value=navigationPages.includes(next)?next:'Dashboard';if(page.value==='Dashboard'){resetFilters();report.value='Overview'}}
 function activateFlow(dataset){const filter=flowTransactionFilter(dataset);if(!filter)return;recordKind.value=filter.recordKind;cards.value=filter.cardIds??cards.value;category.value=filter.category??category.value;search.value='';navigate('Transactions')}
 function selectRecordKind(kind){recordKind.value=recordKind.value===kind?'all':kind;category.value='All categories'}
@@ -144,7 +196,16 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);saveTheme(value)
       <div class="language-switch" aria-label="Language / 语言"><button v-for="lang in ['en','zh']" :key="lang" :class="{selected:language===lang}" :aria-pressed="language===lang" @click="language=lang">{{ lang.toUpperCase() }}</button></div>
       <div class="theme-switch"><button :class="{selected:dark}" :title="t('Dark mode')" :aria-pressed="dark" @click="dark=true">☾</button><button :class="{selected:!dark}" :title="t('Light mode')" :aria-pressed="!dark" @click="dark=false">☼</button></div>
       <button class="icon notification" :aria-label="t('Notifications')" @click="toast('You’re all caught up. Your records are saved locally.')"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-2 7-2 9h16c0-2-2-2-2-9M9 21h6"/></svg><i/></button>
-      <button class="avatar" :title="t('Local account')" @click="toast('Local account · Data is stored in this browser')">QY</button>
+      <a v-if="cloudSession.mode!=='cloud'" class="chatgpt-signin" href="/signin-with-chatgpt?return_to=%2F" target="_top">{{ t('Sign in with ChatGPT') }}</a>
+      <div v-else class="account-menu">
+        <button class="avatar cloud-avatar" :aria-label="t('Cloud account')+' '+maskedId()" :aria-expanded="accountMenuOpen" :title="t('Cloud account')" @click.stop="accountMenuOpen=!accountMenuOpen">{{ maskedId() }}</button>
+        <div v-if="accountMenuOpen" class="account-menu-pop" role="menu">
+          <span class="account-menu-title">{{ t('Cloud account') }}</span>
+          <span class="account-menu-id">{{ maskedId() }}</span>
+          <a role="menuitem" href="/signout-with-chatgpt?return_to=%2F" target="_top" @click="signOut($event)">{{ t('Sign out') }}</a>
+        </div>
+      </div>
+      <button v-if="cloudSession.mode!=='cloud'" class="avatar" :title="t('Local account')" @click="toast('Local account · Data is stored in this browser')">QY</button>
     </div>
   </header>
   <main>
@@ -203,6 +264,6 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);saveTheme(value)
   <footer><img class="footer-brand" src="/assets/logo-mini.svg" alt="QYNT" width="105" height="119"/><span>{{ t('A clear view of your financial world.') }}</span><a class="footer-contact" href="mailto:leakice@qq.com,2632364603@qq.com">{{ t('Contact us') }}</a></footer>
   <EntryDialog :entries="entries" :error="formError" ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
   <CardDialog ref="cardDialog" :t="t" @save="saveCard" @remove="removeCard"/>
-  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :t="t" @import="importData" @notify="toast"/>
-  <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button></div>
+  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :cloud-mode="cloudSession.mode==='cloud'" :conflict-available="conflictBackupAvailable" :t="t" @import="importData" @notify="toast" @restore-conflict="restoreConflictCopy"/>
+  <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button><button v-if="notification===CONFLICT_NOTICE&&conflictBackupAvailable" class="undo" @click="restoreConflictCopy">{{ t('Restore my changes') }}</button></div>
 </template>

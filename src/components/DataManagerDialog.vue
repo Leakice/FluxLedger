@@ -2,8 +2,8 @@
 import { ref } from 'vue';
 import { exportBackup, parseImportFile } from '../storage/local';
 
-const props = defineProps({ entries: Array, cards: Array, hiddenBuiltInCardIds: Array, t: Function });
-const emit = defineEmits(['import', 'notify']);
+const props = defineProps({ entries: Array, cards: Array, hiddenBuiltInCardIds: Array, cloudMode: Boolean, conflictAvailable: Boolean, t: Function });
+const emit = defineEmits(['import', 'notify', 'restore-conflict']);
 const dialog = ref(null), fileInput = ref(null), pending = ref(null), error = ref('');
 
 function open() {
@@ -71,13 +71,19 @@ defineExpose({ open });
         <span class="data-action-copy"><strong>{{ t('Export data') }}</strong><small>{{ t('Download transactions and accounts as a JSON backup.') }}</small></span>
         <span class="data-action-arrow" aria-hidden="true">↗</span>
       </button>
-      <button type="button" class="data-action" @click="fileInput.click()">
+      <button v-if="!cloudMode" type="button" class="data-action" @click="fileInput.click()">
         <span class="data-action-icon import" aria-hidden="true">↑</span>
         <span class="data-action-copy"><strong>{{ t('Import data') }}</strong><small>{{ t('Restore a JSON backup or a legacy CSV export.') }}</small></span>
         <span class="data-action-arrow" aria-hidden="true">↗</span>
       </button>
-      <input ref="fileInput" class="data-file-input" type="file" accept=".json,.csv,application/json,text/csv" @change="chooseFile">
+      <input v-if="!cloudMode" ref="fileInput" class="data-file-input" type="file" accept=".json,.csv,application/json,text/csv" @change="chooseFile">
+      <button v-if="cloudMode&&conflictAvailable" type="button" class="data-action" @click="emit('restore-conflict')">
+        <span class="data-action-icon import" aria-hidden="true">↺</span>
+        <span class="data-action-copy"><strong>{{ t('Restore unsaved copy') }}</strong><small>{{ t('Put your unsaved changes from the last sync conflict back into the ledger.') }}</small></span>
+        <span class="data-action-arrow" aria-hidden="true">↗</span>
+      </button>
     </div>
+    <p v-if="cloudMode" class="form-note">{{ t('Import for cloud accounts arrives with a later update. Export stays available.') }}</p>
     <p v-if="error" class="data-error" role="alert">{{ t(error) }}</p>
     <div v-if="pending" class="data-import-preview">
       <div class="import-preview-heading"><strong>{{ t('Ready to import') }}</strong><small>{{ pending.fileName }}</small></div>

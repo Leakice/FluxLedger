@@ -61,3 +61,15 @@ dialog[open]{animation:dialog-in .3s var(--ease-spring)}dialog[open]::backdrop{a
 #repayment-records .table-wrap :is(th,td):nth-child(4) { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; width: 160px; min-width: 160px; }
 
 #flow-chart [data-flow-id] { cursor: pointer; }
+/* —— ChatGPT 登录入口与云端账户菜单（PR3）—— */
+.chatgpt-signin{display:inline-flex;align-items:center;height:42px;padding:0 18px;border-radius:24px;border:1px solid #dfe4e6;background:var(--panel);font-size:12px;font-weight:600;white-space:nowrap;text-decoration:none;color:var(--ink)}
+.chatgpt-signin:hover{filter:brightness(.96)}
+.account-menu{position:relative;display:inline-flex}
+.cloud-avatar{font-size:12px;letter-spacing:.2px}
+.account-menu-pop{position:absolute;top:calc(100% + 10px);right:0;background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:190px;z-index:20;text-align:left}
+.account-menu-title{font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase}
+.account-menu-id{font-size:13px;font-family:Georgia}
+.account-menu-pop a{font-size:12px;color:var(--ink);text-decoration:none;border-top:1px solid var(--line);padding-top:10px;margin-top:2px}
+.account-menu-pop a:hover{color:#1877f8}
+@media(max-width:800px){.chatgpt-signin{height:34px;padding:0 12px;font-size:11px}}
+@media(max-width:520px){.chatgpt-signin{height:30px;padding:0 10px;font-size:10px}.account-menu-pop{min-width:160px}}
