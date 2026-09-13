@@ -39,9 +39,23 @@
 | 3 | 服务端按稳定 user id 向 D1 写入并读取测试记录 | ✅ 通过 | POST 201 `{id:1,userId:"local_seedy"}`；GET 返回按 user_id 过滤的记录 |
 | 4 | 退出后恢复匿名（游客本地模式不受影响） | ✅ 通过 | `/signout-with-chatgpt` 后 whoami 401 |
 | 5 | 本地进程重启后 D1 测试记录仍在（**非托管重新部署**，后者见 #8） | ✅ 通过（本地 .wrangler/state） | 杀进程重启后 GET 返回原 2 条记录 |
-| 6 | 双账号数据隔离 | ⏳ 待托管环境 | 本地模拟只有单一身份 local_seedy，无法构造第二真实账号 |
-| 7 | 真实 ChatGPT 登录（真实 user id / email 头） | ⏳ 待托管环境 | 本地仅模拟身份 |
-| 8 | 生产/托管部署后的持久化与认证头注入 | ⏳ 待托管环境 | 由维护者在 Sites 平台执行 |
+| 6 | 双账号数据隔离 | ✅ 通过（2026-09-13 托管测试站，账号 A/B/A 实测） | ownRecordVisible=true、otherRecordVisible=false，见 [hosted-validation-d2.md](hosted-validation-d2.md) |
+| 7 | 真实 ChatGPT 登录（真实 user id / email 头） | ✅ 通过（2026-09-13 托管测试站） | whoami 200、realIdentityPresent=true、no-store；截图+浏览器脚本，见 hosted-validation-d2.md |
+| 8 | 生产/托管部署后的持久化与认证头注入 | ✅ 通过（2026-09-13 托管测试站重部署） | 平台只读查询确认记录完整保留；用户 GET 复查符合预期，见 hosted-validation-d2.md |
+| 11 | 伪造认证头防冒充 | ✅ 通过（2026-09-13 托管测试站，已测请求） | 伪造头请求 200 且 forgedIdentityUnchanged=true（身份未被冒充）；匿名 401 可能来自平台访问控制层，见 hosted-validation-d2.md 边界注记 |
+
+## 三-B、托管环境验证结果（2026-09-13）
+
+测试站 `https://fluxledger-d2-verify.leakice.chatgpt.site`（Site `appgprj_6aa687564fd08191acb123c750baad15`，
+源码 870261e…，两次部署 succeeded）。**四项托管门槛全部通过**，完整执行记录（含证据来源边界、
+双账号测试纠正记录、脱敏原则）见 [hosted-validation-d2.md](hosted-validation-d2.md)：
+
+1. 真实 ChatGPT 登录与身份头注入 ✅（浏览器实测：whoami 200、realIdentityPresent=true、no-store）；
+2. 双账号数据隔离 ✅（账号 A→B→A 实测，d2-isolation-round2- 标记，互不可见）；
+3. 托管重部署后持久化 ✅（平台只读查询 + 用户 GET 复查，同一记录完整保留）；
+4. 伪造认证头防冒充 ✅（登录态伪造请求 forgedIdentityUnchanged=true；匿名 401 可能来自平台访问控制层）。
+
+证据归属：浏览器操作由用户实测确认；重部署与数据库对比由工具执行。记录不含真实邮箱、userId、Cookie 或令牌。
 
 ## 四、待维护者在 Sites 环境执行的交接清单
 
@@ -56,10 +70,13 @@
 
 以下四项**全部通过**后才允许接入真实多用户数据写入（此前仅限测试数据）：
 
-1. 真实 ChatGPT 登录与平台身份头注入（验证 #7）；
-2. 双账号数据隔离（验证 #6）；
-3. 托管部署后的持久化（验证 #8，区别于本地进程重启）；
-4. 伪造认证头无法冒充其他用户（交接清单 #6）。
+1. 真实 ChatGPT 登录与平台身份头注入（验证 #7）——✅ 2026-09-13 托管通过；
+2. 双账号数据隔离（验证 #6）——✅ 2026-09-13 托管通过；
+3. 托管部署后的持久化（验证 #8，区别于本地进程重启）——✅ 2026-09-13 托管通过；
+4. 伪造认证头无法冒充其他用户（交接清单 #6）——✅ 2026-09-13 托管通过。
+
+**四项门槛已于 2026-09-13 在托管测试站全部通过，进入真实多用户数据写入的条件已满足（解锁 PR2 数据访问层）。**
+边界说明：这不等于正式账单功能已实现，也不构成生产上线批准；生产 Site 的受众与访问策略仍由维护者另行配置。
 
 ## 五、与 Cloudflare 产出的关系
 
