@@ -48,6 +48,7 @@ npx wrangler pages deploy dist --branch main
   - 新增端点按 `functions/api/<资源>/<操作>.js` 展开，公共逻辑放 `functions/api/_middleware.js` 或 `functions/lib/`（后续 PR 引入）；
 - D1 通过 `env.DB` 访问（binding 定义在 `wrangler.toml`），不要在代码里硬编码 database_id；
 - 现有 `functions/api/spike/note.js` 是 PR1 的冒烟端点（GET/POST），仅用于验证链路，正式 API（鉴权、业务表、统一错误码）在后续 PR 重建，届时会删除 spike 端点与 `spike_notes` 表；
+- **spike 端点不是公开接口**：请求必须携带 `x-spike-token` 头且等于 `SPIKE_TOKEN` secret（远端经 `wrangler pages secret put SPIKE_TOKEN --project-name fluxledger` 注入，本地放 `.dev.vars`，均已 gitignore）；`note` 长度上限 512 字符；`spike_notes` 超过 200 行后写入返回 429（防止 D1 被刷爆）。secret 未配置的环境整体关闭（404，fail closed）；
 - OAuth 等 secret 一律通过 `wrangler pages secret put`（或 Dashboard 环境变量）注入，以 `env.<NAME>` 读取；**任何凭据不得进仓库**。
 
 ## 4. D1 工具链
@@ -80,10 +81,13 @@ npx wrangler d1 execute fluxledger-d1 --remote --command "SELECT * FROM spike_no
 | 部署 #1（`280d857a`）写入读回 | ✅ POST 写入 `remote-smoke-2026-09-13-before-redeploy`，GET 读回一致 |
 | **重新部署后持久化** | ✅ 部署 #2（`1cafadb9`）与分支别名域名 GET 均读回同一行（同 id、同 `created_at`），D1 数据跨部署持久成立 |
 | 匿名游客回归 | ✅ `npm test` 75 项全绿、`npm run build` 通过；浏览器实测记账 → 刷新保留 → 导出 → 导入恢复，localStorage 行为无任何变化 |
+| spike 端点防护（review P1 修复后复验） | ✅ 本地与 preview 部署上：无 token / 错 token 均返回 401，公开 GET 不再返回数据；带 token 读写正常；超 512 字符返回 413；首次部署写入的旧数据在新部署仍可读（持久化保持） |
 
 ## 6. 已知坑与注意事项
 
 - **`*.pages.dev` 在国内网络被 SNI 阻断**：默认代理分流规则通常将 `pages.dev` 走直连，导致 TLS 握手被重置。验证 preview 前需在代理软件中为 `*.fluxledger.pages.dev` 添加代理规则（或临时切全局模式）。`api.cloudflare.com` 与 `leakice.cn` 不受影响，wrangler 全程可用。
+- **`wrangler pages secret put` 只对 production 环境生效**：输出会标注 "(production)"，preview 部署读不到该 secret（表现为 fail closed 返回 404）。需要 preview 也生效时，用 API 把 secret 合入 `deployment_configs.preview.env_vars`（PATCH `/accounts/{account}/pages/projects/{project}`；注意 `fail_open` 等属性必须两个环境一起传且值一致，否则报 8000066），PATCH 后需重新部署才生效。
+- **本地 `wrangler pages dev` 的进程树在 Windows 上杀不干净**：TaskStop/关闭终端可能只杀掉 npx 包装层，残留的 workerd/代理进程会继续占用 8788 端口并热重载新代码，但环境变量仍是启动时的快照（`.dev.vars` 仅在启动时读取），造成「代码生效、secret 失效」的假象。重启前用 `netstat -ano | findstr :8788` 找 PID 全部结束。
 - **迁移文件中不要用 `datetime('true')`** 之类的占位写法：SQLite 会静默求值为 NULL。本仓库统一用 `datetime('now')`（UTC）。
 - **测试数量基线**：任务早期文档写「npm test 61 项」，随着 PR #43–#45 合入，当前基线为 **75 项**，后续回归以此类推取当前主干实际数量。
 - **`spike_notes` 是临时表**：PR3 设计正式 schema 时会通过新迁移清理（DROP 或归档），不作为业务表复用。
