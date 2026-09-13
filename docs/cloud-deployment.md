@@ -1,5 +1,7 @@
 # FluxLedger 云端部署文档（Cloudflare）
 
+> **⚠️ 状态注记（2026-09-13）**：既定方案已确认为主线——**Codex Sites 托管网站与服务端，使用平台托管的 ChatGPT 登录与 Sites 管理的 D1**（见 [sites-login-verification.md](sites-login-verification.md) 及 Issue #46）。本文所述 Cloudflare Pages / wrangler / functions/ 产出为 PR #72 的**历史探索记录**：其中 D1 访问模式（binding `DB` + drizzle）在 Sites 路径下仍然适用；Pages 项目（fluxledger.pages.dev）与 `fluxledger-d1` 数据库的去留待维护者决策，当前不含真实数据。本文中"选定形态：Cloudflare Pages"的表述仅为当时 spike 结论，**不构成对既定托管方案的修订**。
+
 本文记录 FluxLedger 云端化的站点形态结论、Cloudflare 资源布局、Functions 目录约定与 D1 工具链，是后续云端化 PR（OAuth 登录、正式 schema）的基础设施依据。结论确立于 PR1（D1 持久化打通 spike，对应 issue #47/#48/#51）。
 
 ## 1. 站点形态结论
