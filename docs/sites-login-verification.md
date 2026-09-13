@@ -9,8 +9,7 @@
 1. `oai-authenticated-user-id` **存在**且有官方稳定性语义：同一用户在同一 Site 内稳定，跨 Site 不同
    （来源：Sites 官方技能 authentication.md；此前调查依据的 learn.chatgpt.com/docs/sites 公开页未列此头，
    属文档不完整，详见技能文件 sites-building/references/authentication.md）。
-2. `oai-authenticated-user-email` / `full-name` 用于展示或联系；授权判断只用 user id / email，
-   full-name 需按 encoding 头解码且不可拆分依赖。
+2. `oai-authenticated-user-email` / `full-name` 仅用于展示或联系；**数据归属与隔离判断只使用同一 Site 内稳定的 user id**，不得使用邮箱（email 可变更且语义为展示）。full-name 需按 encoding 头解码且不可拆分依赖。
 3. 登录、退出与回调路由由 **Sites 平台拥有**（/signin-with-chatgpt、/signout-with-chatgpt、/callback），
    应用不得自行实现这三个路由；登录入口必须是顶层导航链接，不能用 fetch/客户端路由预取。
 4. D1 由 **Sites 平台管理**：`.openai/hosting.json` 声明绑定（`{"d1":"DB","r2":null}`），
@@ -51,6 +50,16 @@
 3. 用两个真实 ChatGPT 账号分别登录：各自 POST /api/d1-test 写入、GET 读取，确认互不可见（验证 #6）。
 4. 在 Sites 控制台重部署一次，复查记录仍在（验证 #8 的平台侧持久化）。
 5. 记录真实 `oai-authenticated-user-id` 样值格式（脱敏后贴回 Issue），供归属键定型。
+6. **伪造认证头验证**：从平台受信任入口之外直接向托管 API 发送带伪造 `oai-authenticated-user-id` / `oai-authenticated-user-email` 头的请求（自建脚本），确认服务端不采信伪造值（未登录仍 401、登录用户身份不被冒充）。认证头的可信性以 Sites 平台注入为前提，此验证必须在托管环境完成。
+
+## 四-B、进入真实多用户写入的门槛
+
+以下四项**全部通过**后才允许接入真实多用户数据写入（此前仅限测试数据）：
+
+1. 真实 ChatGPT 登录与平台身份头注入（验证 #7）；
+2. 双账号数据隔离（验证 #6）；
+3. 托管部署后的持久化（验证 #8，区别于本地进程重启）；
+4. 伪造认证头无法冒充其他用户（交接清单 #6）。
 
 ## 五、与 Cloudflare 产出的关系
 
