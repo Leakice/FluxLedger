@@ -5,3 +5,9 @@ dist/
 .env
 .env.*
 !.env.example
+
+# wrangler 本地状态（D1 本地数据库、缓存）
+.wrangler/
+
+# wrangler pages dev 本地 secret（勿提交）
+.dev.vars
