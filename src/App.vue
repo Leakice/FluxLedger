@@ -6,7 +6,7 @@ import { flowChart, repaymentChart } from './charts';
 import { bindFlowInteraction } from './flowInteraction';
 import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger, inferCreditExpenses } from './ledger';
 import { loadTransactions, saveTransactions, loadCards, saveCards, loadHiddenBuiltInCardIds, saveHiddenBuiltInCardIds, loadLanguage, saveLanguage, loadTheme, saveTheme } from './storage/local';
-import { currentSession, onCloudEvent, signOutLocalCleanup } from './storage/cloud';
+import { currentSession, onCloudEvent, signOutLocalCleanup, hasPendingDraft, flushNow } from './storage/cloud';
 import { maskedUserId } from './storage/uidHash';
 import { navigationPages, transactionFilters, selectTransactionRows, flowTransactionFilter, transactionDescription } from './transactionView';
 import SourceChart from './components/SourceChart.vue';
@@ -33,11 +33,43 @@ const notification=ref(''), deleted=ref(null), filtersOpen=ref(false);
 const cloudSession=currentSession();
 const accountMenuOpen=ref(false);
 const maskedId=()=>maskedUserId(cloudSession.userId||'');
-// 云端事件 → toast 文案（云端模块只发事件类型，文案与翻译留在 UI 层）。
-const cloudToastMessages={'save-failed':'Save failed','conflict':'Sync conflict — cloud data reloaded. Your changes remain on this page.'};
-const offCloudEvent=onCloudEvent(event=>{const message=cloudToastMessages[event];if(message)toast(message);});
+// 冲突后从命名空间缓存重载工作副本：缓存已被云端版本覆盖，内存必须同步跟随，
+// 否则下一次编辑会用新版本号把过期集合推回云端、覆盖另一设备的数据。
+function reloadWorkingCopy(){
+  hiddenBuiltInCardIds.value=loadHiddenBuiltInCardIds();
+  bankCards.value=withBuiltInAccountCards(loadCards(defaultCards),hiddenBuiltInCardIds.value);
+  entries.value=inferCreditExpenses(loadTransactions([]),bankCards.value);
+  cards.value=bankCards.value.map(c=>c.id);
+  deleted.value=null;
+}
+// 云端事件 → UI 反应（云端模块只发事件类型，文案与动作留在 UI 层）。
+const cloudActions={
+  'save-failed':()=>'Save failed',
+  'conflict':()=>{reloadWorkingCopy();return 'Sync conflict — cloud data reloaded. Your unsaved changes were replaced by the cloud version.';},
+  'offline-boot':()=>'Offline: showing cached data. It will sync when you are back online.',
+  'session-unknown':()=>'Sign-in check failed. Running in local mode; changes will not reach the cloud.'
+};
+function handleCloudEvent(event){
+  if(event==='session-changed'){window.location.reload();return;}
+  const action=cloudActions[event];
+  if(action)toast(action());
+}
+const offCloudEvent=onCloudEvent(handleCloudEvent);
 onBeforeUnmount(()=>{offCloudEvent();});
-function signOut(){accountMenuOpen.value=false;signOutLocalCleanup();}
+// 退出登录：有未同步草稿时先尝试同步再走平台退出路由；同步失败则保留本账户
+// 命名空间缓存（云端数据不动），绝不静默丢弃未保存内容。
+async function signOut(event){
+  accountMenuOpen.value=false;
+  if(hasPendingDraft()){
+    event.preventDefault();
+    await flushNow();
+    if(hasPendingDraft())toast('Save failed');
+    else signOutLocalCleanup();
+    window.location.href='/signout-with-chatgpt?return_to=%2F';
+    return;
+  }
+  signOutLocalCleanup();
+}
 const asOf=computed(()=>periodEnd(month.value,period.value));
 const cardName=id=>{const card=bankCards.value.find(c=>c.id===id);return card?t(card.name)+(accountLast4(card)?' · '+accountLast4(card):''):id};
 const limitFor=id=>creditLimit(entries.value,id,asOf.value);
@@ -161,7 +193,7 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);saveTheme(value)
         <div v-if="accountMenuOpen" class="account-menu-pop" role="menu">
           <span class="account-menu-title">{{ t('Cloud account') }}</span>
           <span class="account-menu-id">{{ maskedId() }}</span>
-          <a role="menuitem" href="/signout-with-chatgpt?return_to=%2F" target="_top" @click="signOut">{{ t('Sign out') }}</a>
+          <a role="menuitem" href="/signout-with-chatgpt?return_to=%2F" target="_top" @click="signOut($event)">{{ t('Sign out') }}</a>
         </div>
       </div>
       <button v-if="cloudSession.mode!=='cloud'" class="avatar" :title="t('Local account')" @click="toast('Local account · Data is stored in this browser')">QY</button>
@@ -223,6 +255,6 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);saveTheme(value)
   <footer><img class="footer-brand" src="/assets/logo-mini.svg" alt="QYNT" width="105" height="119"/><span>{{ t('A clear view of your financial world.') }}</span><a class="footer-contact" href="mailto:leakice@qq.com,2632364603@qq.com">{{ t('Contact us') }}</a></footer>
   <EntryDialog :entries="entries" :error="formError" ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
   <CardDialog ref="cardDialog" :t="t" @save="saveCard" @remove="removeCard"/>
-  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :t="t" @import="importData" @notify="toast"/>
+  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :cloud-mode="cloudSession.mode==='cloud'" :t="t" @import="importData" @notify="toast"/>
   <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button></div>
 </template>

@@ -1,6 +1,11 @@
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { getD1 } from "../../d1";
-import { validateBaseVersion, validateLedgerDocument } from "../../ledger-document.js";
+import {
+  LEDGER_DOCUMENT_MAX_BYTES,
+  documentByteSize,
+  validateBaseVersion,
+  validateLedgerDocument,
+} from "../../ledger-document.js";
 
 // 含用户数据的响应一律禁止缓存；错误响应固定文案，不回传 SQL 与内部细节。
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -68,6 +73,9 @@ export async function PUT(request: Request) {
       { error: "data must be an object with array fields: transactions, cards, hiddenBuiltInCardIds" },
       { status: 400, headers: NO_STORE },
     );
+  }
+  if (documentByteSize(body.data) > LEDGER_DOCUMENT_MAX_BYTES) {
+    return Response.json({ error: "document too large" }, { status: 413, headers: NO_STORE });
   }
 
   const data = JSON.stringify(body.data);

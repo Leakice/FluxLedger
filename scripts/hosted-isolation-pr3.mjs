@@ -89,8 +89,19 @@ window.pr3CheckIsolation = async function pr3CheckIsolation(ownLabel, otherLabel
   const marks = pr3LoadMarks();
   const own = marks[ownLabel] || [];
   const other = marks[otherLabel] || [];
-  const ownMarkVisible = own.length > 0 && transactions.some(item => own.includes(item.id));
-  const otherMarkVisible = other.length > 0 && transactions.some(item => other.includes(item.id));
+  // 没有双方标记就没有比较证据：宁判失败（附原因），不许缺证据时误报通过。
+  if (!own.length || !other.length) {
+    return {
+      check: ownLabel + ' 必须看得到自己的标记、看不到 ' + otherLabel + ' 的标记',
+      ownMarkVisible: false,
+      otherMarkVisible: false,
+      pass: false,
+      missingMarks: [!own.length ? ownLabel : null, !other.length ? otherLabel : null].filter(Boolean),
+      reason: '缺少比较证据：请先以两个账号分别执行 await pr3WriteMark(...) 记录标记，再执行本检查',
+    };
+  }
+  const ownMarkVisible = transactions.some(item => own.includes(item.id));
+  const otherMarkVisible = transactions.some(item => other.includes(item.id));
   return {
     check: ownLabel + ' 必须看得到自己的标记、看不到 ' + otherLabel + ' 的标记',
     ownMarks: own,

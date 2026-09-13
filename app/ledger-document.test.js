@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LEDGER_DOCUMENT_KEYS, buildLedgerDocument, validateBaseVersion, validateLedgerDocument } from './ledger-document.js';
+import {
+  LEDGER_DOCUMENT_KEYS, LEDGER_DOCUMENT_MAX_BYTES,
+  buildLedgerDocument, documentByteSize, validateBaseVersion, validateLedgerDocument,
+} from './ledger-document.js';
 
 const validDocument = () => ({ transactions: [], cards: [], hiddenBuiltInCardIds: ['online-alipay'] });
 
@@ -25,10 +28,17 @@ test('validation rejects missing, non-array or unknown keys', () => {
     false,
     'unknown keys are rejected so the document schema cannot drift silently',
   );
+});
+
+test('validation rejects array entries that would crash the frontend calculations', () => {
+  assert.equal(validateLedgerDocument({ transactions: [null], cards: [], hiddenBuiltInCardIds: [] }), false, 'null entry');
+  assert.equal(validateLedgerDocument({ transactions: ['x'], cards: [], hiddenBuiltInCardIds: [] }), false, 'scalar entry');
+  assert.equal(validateLedgerDocument({ transactions: [[]], cards: [], hiddenBuiltInCardIds: [] }), false, 'nested array entry');
+  assert.equal(validateLedgerDocument({ transactions: [], cards: [], hiddenBuiltInCardIds: [null] }), false, 'id lists take non-empty strings only');
   assert.equal(
-    validateLedgerDocument({ transactions: [1], cards: [{ id: 'x' }], hiddenBuiltInCardIds: [] }),
+    validateLedgerDocument({ transactions: [{ id: 't1' }], cards: [{ id: 'c1' }], hiddenBuiltInCardIds: ['online-wechat'] }),
     true,
-    'element shapes are the ledger/domain layer’s concern, arrays are the document’s contract',
+    'object lists take plain objects; id lists take non-empty strings',
   );
 });
 
@@ -49,4 +59,14 @@ test('baseVersion must be a non-negative safe integer', () => {
   assert.equal(validateBaseVersion('3'), false);
   assert.equal(validateBaseVersion(null), false);
   assert.equal(validateBaseVersion(true), false);
+});
+
+test('document byte size is measured and capped far below storage limits', () => {
+  const small = buildLedgerDocument([{ id: 't1', description: '咖啡' }], [], []);
+  const size = documentByteSize(small);
+  assert.ok(Number.isFinite(size) && size > 0);
+  assert.ok(size > JSON.stringify(small).length / 4, 'multi-byte characters are not under-counted');
+  assert.ok(size < LEDGER_DOCUMENT_MAX_BYTES);
+  const oversized = buildLedgerDocument([{ id: 't2', description: 'x'.repeat(LEDGER_DOCUMENT_MAX_BYTES) }], [], []);
+  assert.ok(documentByteSize(oversized) > LEDGER_DOCUMENT_MAX_BYTES, 'the API rejects these with 413');
 });
