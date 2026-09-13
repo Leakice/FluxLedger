@@ -2,6 +2,8 @@
 
 本文记录 FluxLedger 云端化的站点形态结论、Cloudflare 资源布局、Functions 目录约定与 D1 工具链，是后续云端化 PR（OAuth 登录、正式 schema）的基础设施依据。结论确立于 PR1（D1 持久化打通 spike，对应 issue #47/#48/#51）。
 
+> 关于 ChatGPT 登录（#49/#50）的接入可行性调查结论见 [login-feasibility.md](./login-feasibility.md)（2026-09-13：第三方注册入口未开放，登录实现阻塞中）。
+
 ## 1. 站点形态结论
 
 | 项目 | 结论 |
