@@ -25,7 +25,7 @@ export function setupDom() {
   const window = new Window({ url: 'https://localhost/' });
   const keys = [
     'window', 'document', 'navigator', 'location', 'history', 'screen',
-    'HTMLElement', 'Element', 'Node', 'Text', 'SVGElement', 'SVGGraphicsElement',
+    'Document', 'HTMLElement', 'Element', 'Node', 'Text', 'SVGElement', 'SVGGraphicsElement',
     'DocumentFragment', 'ShadowRoot', 'CSSStyleDeclaration',
     'HTMLDialogElement', 'HTMLInputElement', 'HTMLSelectElement', 'HTMLAnchorElement',
     'HTMLTextAreaElement', 'HTMLFormElement', 'HTMLButtonElement', 'HTMLDivElement',

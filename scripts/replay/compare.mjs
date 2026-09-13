@@ -12,7 +12,7 @@ const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
 const pr = JSON.parse(readFileSync(prPath, 'utf8'));
 
 let mismatches = 0;
-let checks = 0;
+const counted = { storage: 0, page: 0, exports: 0 };
 
 function fail(path, reason) {
   mismatches += 1;
@@ -20,7 +20,9 @@ function fail(path, reason) {
 }
 
 function compareValue(path, a, b) {
-  checks += 1;
+  if (path.includes('/page/')) counted.page += 1;
+  else if (path.includes('/export:')) counted.exports += 1;
+  else counted.storage += 1;
   if (a === b) return;
   fail(path, `baseline=${JSON.stringify(a)} pr=${JSON.stringify(b)}`);
 }
@@ -49,9 +51,9 @@ for (const name of Object.keys(baseScenarios)) {
     for (const key of Object.keys(cp.keys)) {
       compareValue(`scenario:${name}/checkpoint:${cp.name}/${key}`, cp.keys[key], otherCp.keys[key]);
     }
-    compareValue(`scenario:${name}/checkpoint:${cp.name}/lang`, cp.page.lang, otherCp.page.lang);
-    compareValue(`scenario:${name}/checkpoint:${cp.name}/title`, cp.page.title, otherCp.page.title);
-    compareValue(`scenario:${name}/checkpoint:${cp.name}/bodyClass`, cp.page.bodyClass, otherCp.page.bodyClass);
+    compareValue(`scenario:${name}/checkpoint:${cp.name}/page/lang`, cp.page.lang, otherCp.page.lang);
+    compareValue(`scenario:${name}/checkpoint:${cp.name}/page/title`, cp.page.title, otherCp.page.title);
+    compareValue(`scenario:${name}/checkpoint:${cp.name}/page/bodyClass`, cp.page.bodyClass, otherCp.page.bodyClass);
   }
   const otherExportsBy = Object.fromEntries((other.exports || []).map(e => [e.name, e.backup]));
   for (const exp of base.exports || []) {
@@ -64,7 +66,7 @@ for (const name of Object.keys(baseScenarios)) {
 }
 
 const baseCount = baseline.scenarios.reduce((sum, s) => sum + s.checkpoints.length, 0);
-console.error(`${checks} raw values compared across ${baseline.scenarios.length} scenarios (${baseCount} checkpoints per side).`);
+console.error(`${baseCount} checkpoints per side: ${counted.storage} storage values + ${counted.page} page attributes + ${counted.exports} exports compared.`);
 if (mismatches) {
   console.error(`FAILED: ${mismatches} mismatches`);
   process.exit(1);

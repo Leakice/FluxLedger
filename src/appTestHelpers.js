@@ -76,8 +76,9 @@ export function snapshotKeys(storage) {
   return snapshot;
 }
 
-// DataManagerDialog exposes only `open`, so drive its internal exportData via
-// the component instance and capture the Blob handed to URL.createObjectURL.
+// Drives the real export chain: the data-manager trigger button, the dialog's
+// own export action button, and the anchor-download code path. Node has no
+// URL.createObjectURL, so the stub captures the Blob the dialog created.
 export async function captureExport(state) {
   let blob = null;
   const original = globalThis.URL.createObjectURL;
@@ -86,12 +87,36 @@ export async function captureExport(state) {
     return 'blob:captured';
   };
   try {
-    state.dataDialog.$.setupState.exportData();
+    document.querySelector('.data-manager-trigger').click();
+    await flush();
+    document.querySelector('.data-actions .data-action').click();
+    await flush();
   } finally {
     if (original === undefined) delete globalThis.URL.createObjectURL;
     else globalThis.URL.createObjectURL = original;
   }
-  return blob ? blob.text() : null;
+  if (!blob) return null;
+  return blob.text();
+}
+
+// Opens the data manager dialog and feeds a file to its real <input
+// type=file>, running chooseFile → parse → preview. The caller asserts the
+// preview and clicks the confirm button to complete the replacement.
+export async function chooseImportFile(text, fileName) {
+  document.querySelector('.data-manager-trigger').click();
+  await flush();
+  const file = new File([text], fileName, {
+    type: fileName.endsWith('.json') ? 'application/json' : 'text/csv',
+  });
+  const input = document.querySelector('.data-file-input');
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  input.dispatchEvent(new Event('change'));
+  await flush();
+}
+
+// Drives the real confirmation button of the rendered import preview.
+export function confirmImport() {
+  document.querySelector('.data-import-preview .primary.submit').click();
 }
 
 const FIXED_NOW = Date.parse('2026-09-13T12:00:00.000Z');

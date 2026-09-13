@@ -67,7 +67,6 @@ function clearTrackedTimers() {
 
 const appRoot = resolve(values.app);
 const appModulePromise = import(pathToFileURL(resolve(appRoot, 'src/App.vue')).href);
-const dataTransferPromise = import(pathToFileURL(resolve(appRoot, 'src/dataTransfer.js')).href);
 
 async function flush() {
   const { nextTick } = await import('vue');
@@ -136,13 +135,35 @@ async function exportJson(name) {
   };
   try {
     await flush();
-    current.app._instance.setupState.dataDialog.$.setupState.exportData();
+    document.querySelector('.data-manager-trigger').click();
+    await flush();
+    document.querySelector('.data-actions .data-action').click();
     await flush();
   } finally {
     if (original === undefined) delete globalThis.URL.createObjectURL;
     else globalThis.URL.createObjectURL = original;
   }
+  if (!blob) throw new Error('export produced no blob');
   context.exports.push({ name, backup: await blob.text() });
+}
+
+// Feeds a file to the data manager dialog's real file input and confirms the
+// replacement through the rendered preview, so both versions run the whole
+// DataManagerDialog chain (chooseFile → parse → preview → import) and not just
+// the resulting App.importData call.
+async function importViaDialog(text, fileName) {
+  document.querySelector('.data-manager-trigger').click();
+  await flush();
+  const file = new File([text], fileName, {
+    type: fileName.endsWith('.json') ? 'application/json' : 'text/csv',
+  });
+  const input = document.querySelector('.data-file-input');
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  input.dispatchEvent(new Event('change'));
+  await flush();
+  if (!document.querySelector('.data-import-preview')) throw new Error('import preview did not render');
+  document.querySelector('.data-import-preview .primary.submit').click();
+  await flush();
 }
 
 // ---- fixtures ----
@@ -201,7 +222,7 @@ const expense = (id, overrides = {}) => ({
 // ---- scenario 1: transactions, filters, theme, reload, export ----
 scenario('1-mixed-flow', fixtures.seeded, async () => {
   await checkpoint('open');
-  state().language = 'zh';
+  document.querySelectorAll('.language-switch button')[1].click();
   await checkpoint('switch-zh');
   state().saveEntry(expense(1001));
   await checkpoint('add-expense');
@@ -211,11 +232,11 @@ scenario('1-mixed-flow', fixtures.seeded, async () => {
   await checkpoint('delete-expense');
   state().undo();
   await checkpoint('undo');
-  state().cards = ['4329'];
+  document.querySelector('.bank-card-list input[type=checkbox]').click();
   await checkpoint('filter-one-account');
-  state().cards = state().bankCards.map(c => c.id);
+  document.querySelectorAll('nav button')[0].click();
   await checkpoint('filter-all-accounts');
-  state().dark = true;
+  document.querySelector('.theme-switch button').click();
   await checkpoint('dark-theme');
   await reload();
   await checkpoint('reload');
@@ -252,8 +273,7 @@ scenario('3-loan-account', fixtures.seeded, async () => {
 // ---- scenario 4: JSON import round trip ----
 scenario('4-json-import', fixtures.seeded, async () => {
   await checkpoint('open');
-  const { parseDataFile } = await dataTransferPromise;
-  state().importData(parseDataFile(importFile, { cards: state().bankCards }));
+  await importViaDialog(importFile, 'backup.json');
   await checkpoint('imported');
   await exportJson('export-after-import');
   await reload();
@@ -263,8 +283,7 @@ scenario('4-json-import', fixtures.seeded, async () => {
 // ---- scenario 5: legacy CSV import round trip ----
 scenario('5-csv-import', fixtures.seeded, async () => {
   await checkpoint('open');
-  const { parseDataFile } = await dataTransferPromise;
-  state().importData(parseDataFile(csvFile, { cards: state().bankCards }));
+  await importViaDialog(csvFile, 'legacy.csv');
   await checkpoint('imported');
   await exportJson('export-after-import');
   await reload();
@@ -309,15 +328,23 @@ scenario('8-corrupted-data', fixtures.corrupted, async () => {
 // ---- scenario 9: raw preference strings, chart-jump filters, hidden restore ----
 scenario('9-prefs-and-filters', fixtures.rawPrefs, async () => {
   await checkpoint('open');
-  state().cards = ['8851'];
+  // Uncheck the second account (no records), keeping the first account's
+  // capacity above zero so the flow chart keeps rendering its account node.
+  document.querySelectorAll('.bank-card-list input[type=checkbox]')[1].click();
   await checkpoint('filter-one-account');
-  state().activateFlow({ flowId: 'account:4329' });
+  document.querySelector('#flow-chart [data-flow-id^="account:"]')
+    .dispatchEvent(new MouseEvent('click', { bubbles: true }));
   await checkpoint('chart-jump-filter');
-  state().reset();
+  await checkpoint('chart-jump-filter');
+  document.querySelectorAll('nav button')[0].click();
   await checkpoint('reset-filters');
-  state().dark = true;
+  document.querySelector('.theme-switch button').click();
   await checkpoint('dark-theme');
-  state().removeCard('online-lingqiantong');
+  const row = [...document.querySelectorAll('.bank-card-row')]
+    .find(item => item.querySelector('input').value === 'online-lingqiantong');
+  row.querySelector('.bank-card-edit').click();
+  await flush();
+  document.querySelector('.card-delete').click();
   await checkpoint('delete-built-in');
   await reload();
   await checkpoint('reload');

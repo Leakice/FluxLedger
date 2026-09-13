@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import { parseDataFile, createDataBackup } from './dataTransfer.js';
 import {
   MapStorage, STORAGE_KEYS, mountApp, flush, snapshotKeys, captureExport,
-  pinDeterminism, clearTrackedTimers, legacyFixture, simpleFixture, expenseOf,
+  chooseImportFile, confirmImport, pinDeterminism, clearTrackedTimers,
+  legacyFixture, simpleFixture, expenseOf,
 } from './appTestHelpers.js';
 
 const { transactions: TRANSACTIONS_KEY, cards: CARDS_KEY, hiddenBuiltInCardIds: HIDDEN_KEY,
@@ -199,22 +200,74 @@ test('export uses the complete in-memory snapshot and writes nothing to storage'
   } finally { app.unmount(); restore(); }
 });
 
-test('account filter changes never write any storage key', async () => {
+test('account filter changes through real controls never write any storage key', async () => {
   const app = await mountApp({ storage: new MapStorage(simpleFixture()) });
   try {
     const before = snapshotKeys(app.storage);
-    app.state.cards = ['4329'];
+    document.querySelector('.bank-card-list input[type=checkbox]').click();
     await flush();
-    app.state.accountFilter = '8851';
+    assert.ok(!app.state.cards.includes('4329'), 'unchecking the first account updates the selection');
+    document.querySelectorAll('nav button')[1].click();
     await flush();
-    app.state.reset();
+    const accountSelect = document.querySelector('select[aria-label="Filter account"]');
+    accountSelect.value = '8851';
+    accountSelect.dispatchEvent(new Event('change'));
     await flush();
-    assert.deepEqual(app.state.cards, app.state.bankCards.map(c => c.id));
-    app.state.activateFlow({ flowId: 'account:4329' });
+    assert.deepEqual(app.state.cards, ['8851'], 'the account column filter drives the selection');
+    document.querySelectorAll('nav button')[0].click();
     await flush();
-    assert.equal(app.state.page, 'Transactions');
-    assert.deepEqual(app.state.cards, ['4329']);
+    document.querySelector('#flow-chart [data-flow-id^="account:"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flush();
+    assert.equal(app.state.page, 'Transactions', 'the chart hit area jumps to the transactions page');
+    assert.equal(app.state.cards.length, 1, 'the chart jump narrows the account selection');
+    document.querySelectorAll('nav button')[0].click();
+    await flush();
+    document.querySelector('.aside-title button.icon').click();
+    await flush();
+    assert.deepEqual(app.state.cards, app.state.bankCards.map(c => c.id), 'reset restores every account');
     assert.deepEqual(snapshotKeys(app.storage), before, 'filters are ephemeral UI state');
+  } finally { app.unmount(); }
+});
+
+test('JSON import goes through the data manager dialog end to end', async () => {
+  const app = await mountApp({ storage: new MapStorage(simpleFixture()) });
+  try {
+    await chooseImportFile(JSON.stringify({
+      app: 'FluxLedger', version: 1, exportedAt: '2026-01-01T00:00:00.000Z',
+      transactions: [{ id: 501, type: 'expense', card: '1001', amount: 9, date: '2026-08-15', category: 'Food & Drinks', description: 'Imported snack' }],
+      cards: [{ id: '1001', name: 'Imported card', last4: '', noLast4: true, network: 'Other', accountType: 'Alipay', color: '#123456' }],
+      hiddenBuiltInCardIds: ['online-alipay'],
+    }), 'backup.json');
+    const preview = document.querySelector('.data-import-preview');
+    assert.ok(preview, 'the import preview renders after choosing a file');
+    assert.ok(preview.textContent.includes('backup.json'), 'the preview names the chosen file');
+    confirmImport();
+    await flush();
+    const transactions = storedTransactions(app.storage);
+    assert.equal(transactions.length, 1);
+    assert.equal(transactions[0].id, 501);
+    assert.equal(transactions[0].onCredit, false, 'confirmed import persists the inferred final state');
+    assert.equal(app.storage.getItem(HIDDEN_KEY), '["online-alipay"]');
+    assert.ok(storedCards(app.storage).some(c => c.id === '1001'));
+    assert.ok(!storedCards(app.storage).some(c => c.id === 'online-alipay'));
+  } finally { app.unmount(); }
+});
+
+test('legacy CSV import goes through the data manager dialog end to end', async () => {
+  const app = await mountApp({ storage: new MapStorage(simpleFixture()) });
+  try {
+    await chooseImportFile(['Description,Type,Category,Date,Account,Amount',
+      'Coffee,expense,Food & Drinks,2026-09-06,Everyday card · 1001,3.5'].join('\n'), 'legacy.csv');
+    const preview = document.querySelector('.data-import-preview');
+    assert.ok(preview, 'the import preview renders for a legacy CSV file');
+    confirmImport();
+    await flush();
+    const transactions = storedTransactions(app.storage);
+    assert.equal(transactions.length, 1);
+    assert.equal(transactions[0].description, 'Coffee');
+    assert.equal(transactions[0].card, '4329');
+    assert.equal(transactions[0].onCredit, false);
   } finally { app.unmount(); }
 });
 

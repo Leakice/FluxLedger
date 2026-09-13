@@ -129,12 +129,29 @@ test('write failures are not silently reported as success', () => {
 });
 
 test('injected backends are isolated from each other and from the default', () => {
-  const first = new MapStorage();
-  const second = new MapStorage();
-  saveTransactions(sampleTransactions, first);
-  assert.equal(second.getItem(TRANSACTIONS_KEY), null);
-  assert.deepEqual(loadTransactions(['fallback'], second), ['fallback']);
-  assert.equal(typeof defaultBackend(), 'object', 'the default backend resolves to a localStorage-like object');
+  // Runs without a browser too: install an explicit default backend and
+  // restore whatever was there (possibly nothing) afterwards.
+  const original = globalThis.localStorage;
+  const defaultStorage = new MapStorage({ [LANGUAGE_KEY]: 'sentinel' });
+  globalThis.localStorage = defaultStorage;
+  try {
+    assert.equal(defaultBackend(), defaultStorage, 'the default backend resolves the current global localStorage');
+    const first = new MapStorage();
+    const second = new MapStorage();
+    saveTransactions(sampleTransactions, first);
+    saveLanguage('zh', second);
+    saveTheme(true, second);
+    assert.equal(defaultStorage.getItem(TRANSACTIONS_KEY), null, 'injected-backend writes must not reach the default backend');
+    assert.equal(defaultStorage.getItem(LANGUAGE_KEY), 'sentinel', 'injected-backend writes must not touch the default backend');
+    assert.equal(second.getItem(TRANSACTIONS_KEY), null);
+    assert.deepEqual(loadTransactions(['fallback'], second), ['fallback']);
+  } finally {
+    if (original === undefined) {
+      try { delete globalThis.localStorage; } catch { /* keep environment as-is */ }
+    } else {
+      globalThis.localStorage = original;
+    }
+  }
 });
 
 test('import and export wrappers keep the dataTransfer contract', () => {
