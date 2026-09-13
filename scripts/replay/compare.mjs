@@ -27,7 +27,17 @@ function compareValue(path, a, b) {
   fail(path, `baseline=${JSON.stringify(a)} pr=${JSON.stringify(b)}`);
 }
 
-const scenariosBy = list => Object.fromEntries(list.map(s => [s.name, s]));
+const scenariosBy = list => {
+  const byName = {};
+  for (const s of list) {
+    if (s.name in byName) {
+      fail(`scenario:${s.name}`, 'duplicate scenario name');
+      continue;
+    }
+    byName[s.name] = s;
+  }
+  return byName;
+};
 const baseScenarios = scenariosBy(baseline.scenarios);
 const prScenarios = scenariosBy(pr.scenarios);
 
@@ -38,10 +48,21 @@ for (const name of Object.keys(baseScenarios)) {
     fail(`scenario:${name}`, 'missing in PR run');
     continue;
   }
-  if (base.checkpoints.length !== other.checkpoints.length) {
-    fail(`scenario:${name}`, `checkpoint count ${base.checkpoints.length} vs ${other.checkpoints.length}`);
+  const checkpointNames = new Set();
+  for (const cp of base.checkpoints) {
+    if (checkpointNames.has(cp.name)) {
+      fail(`scenario:${name}/checkpoint:${cp.name}`, 'duplicate checkpoint name in baseline run');
+    }
+    checkpointNames.add(cp.name);
   }
-  const otherBy = Object.fromEntries(other.checkpoints.map(c => [c.name, c]));
+  const otherBy = {};
+  for (const cp of other.checkpoints) {
+    if (cp.name in otherBy) {
+      fail(`scenario:${name}/checkpoint:${cp.name}`, 'duplicate checkpoint name in PR run');
+      continue;
+    }
+    otherBy[cp.name] = cp;
+  }
   for (const cp of base.checkpoints) {
     const otherCp = otherBy[cp.name];
     if (!otherCp) {
@@ -57,8 +78,16 @@ for (const name of Object.keys(baseScenarios)) {
   }
   const otherExportsBy = Object.fromEntries((other.exports || []).map(e => [e.name, e.backup]));
   for (const exp of base.exports || []) {
+    if (!exp.backup || !exp.backup.trim()) {
+      fail(`scenario:${name}/export:${exp.name}`, 'empty backup content in baseline run');
+      continue;
+    }
     if (!(exp.name in otherExportsBy)) {
       fail(`scenario:${name}/export:${exp.name}`, 'missing in PR run');
+      continue;
+    }
+    if (!otherExportsBy[exp.name] || !otherExportsBy[exp.name].trim()) {
+      fail(`scenario:${name}/export:${exp.name}`, 'empty backup content in PR run');
       continue;
     }
     compareValue(`scenario:${name}/export:${exp.name}`, exp.backup, otherExportsBy[exp.name]);

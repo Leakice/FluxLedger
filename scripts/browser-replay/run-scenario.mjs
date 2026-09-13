@@ -68,7 +68,7 @@ const snapshotFn = `(() => {
 async function feedFile(tab, text, fileName) {
   return tab.playwright.evaluate(`(async () => {
     const file = new File([${JSON.stringify(text)}], ${JSON.stringify(fileName)}, {
-      type: ${JSON.stringify(fileName.endsWith('.json' ? 'application/json' : 'text/csv'))},
+      type: ${JSON.stringify(fileName)}.endsWith('.json') ? 'application/json' : 'text/csv',
     });
     const transfer = new DataTransfer();
     transfer.items.add(file);
@@ -82,10 +82,9 @@ async function feedFile(tab, text, fileName) {
 
 async function exportOnce(tab, name, exportsCaptured, checkpoints, outDir) {
   await tab.playwright.evaluate(armBlobCapture);
-  let download = 'not observed';
-  const downloadPromise = tab.playwright.waitForEvent('download', { timeoutMs: 8000 }).then(
+  const downloadPromise = tab.playwright.waitForEvent('download', { timeoutMs: 15000 }).then(
     () => 'download event fired',
-    error => `download event error: ${String(error).slice(0, 120)}`,
+    error => { throw new Error(`export download event failed for ${name}: ${String(error).slice(0, 200)}`); },
   );
   const trigger = tab.playwright.locator('.data-manager-trigger');
   if ((await trigger.count()) !== 1) throw new Error('data manager trigger not unique');
@@ -93,9 +92,15 @@ async function exportOnce(tab, name, exportsCaptured, checkpoints, outDir) {
   const exportButton = tab.playwright.getByRole('button', { name: /Export data|导出数据/ });
   if ((await exportButton.count()) !== 1) throw new Error('export button not unique');
   await exportButton.click();
-  download = await downloadPromise;
+  const download = await downloadPromise;
   await tab.playwright.waitForTimeout(200);
   const backup = await tab.playwright.evaluate(`window.__capBlobs.length ? window.__capBlobs[window.__capBlobs.length - 1].text() : Promise.resolve(null)`);
+  if (!backup || !backup.trim()) {
+    throw new Error(`export produced empty backup content for ${name}`);
+  }
+  if (JSON.parse(backup).transactions === undefined) {
+    throw new Error(`exported backup for ${name} is not a FluxLedger backup`);
+  }
   exportsCaptured.push({ name, download, backup });
   writeFileSync(join(outDir, 'exports.json'), JSON.stringify(exportsCaptured, null, 1));
   // dialog stays open; close it via its own close button for the next step

@@ -335,7 +335,6 @@ scenario('9-prefs-and-filters', fixtures.rawPrefs, async () => {
   document.querySelector('#flow-chart [data-flow-id^="account:"]')
     .dispatchEvent(new MouseEvent('click', { bubbles: true }));
   await checkpoint('chart-jump-filter');
-  await checkpoint('chart-jump-filter');
   document.querySelectorAll('nav button')[0].click();
   await checkpoint('reset-filters');
   document.querySelector('.theme-switch button').click();

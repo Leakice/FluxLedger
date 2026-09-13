@@ -29,11 +29,21 @@ const same = (path, a, b) => {
   return false;
 };
 
-const prByName = Object.fromEntries(pr.checkpoints.map(c => [c.name, c]));
+const prByName = {};
+for (const cp of pr.checkpoints) {
+  if (cp.name in prByName) fail(cp.name, 'duplicate checkpoint name in PR run');
+  else prByName[cp.name] = cp;
+}
 if (baseline.checkpoints.length !== pr.checkpoints.length) {
   fail('checkpoints', `count ${baseline.checkpoints.length} vs ${pr.checkpoints.length}`);
 }
+const seenBaseline = new Set();
 for (const cp of baseline.checkpoints) {
+  if (seenBaseline.has(cp.name)) {
+    fail(cp.name, 'duplicate checkpoint name in baseline run');
+    continue;
+  }
+  seenBaseline.add(cp.name);
   const other = prByName[cp.name];
   if (!other) {
     fail(cp.name, 'missing in PR run');
@@ -56,10 +66,21 @@ for (const exp of baseline.exports) {
     continue;
   }
   counted.exports += 1;
-  same(`export:${exp.name}/backup`, exp.backup, other.backup);
-  if (exp.download !== other.download) {
-    console.error(`note: download observation differs at ${exp.name}: baseline=${exp.download} pr=${other.download}`);
+  if (exp.download !== 'download event fired') {
+    fail(`export:${exp.name}/download`, `baseline download not successful: ${exp.download}`);
   }
+  if (other.download !== 'download event fired') {
+    fail(`export:${exp.name}/download`, `PR download not successful: ${other.download}`);
+  }
+  if (!exp.backup || !exp.backup.trim()) {
+    fail(`export:${exp.name}/backup`, 'empty backup content in baseline run');
+    continue;
+  }
+  if (!other.backup || !other.backup.trim()) {
+    fail(`export:${exp.name}/backup`, 'empty backup content in PR run');
+    continue;
+  }
+  same(`export:${exp.name}/backup`, exp.backup, other.backup);
 }
 
 console.error(`${counted.storage} storage values + ${counted.page} page attributes + ${counted.exports} exports compared across ${baseline.checkpoints.length} real-browser checkpoints.`);
