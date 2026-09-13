@@ -9,5 +9,13 @@ dist/
 # wrangler 本地状态（D1 本地数据库、缓存）
 .wrangler/
 
+# Sites 运行时状态（vinext dev 记录、执行档案）
+.vinext/
+.sites-runtime/
+
+# vinext 类型生成与构建缓存（与 sites-verify 口径一致）
+.next/
+next-env.d.ts
+
 # wrangler pages dev 本地 secret（勿提交）
 .dev.vars

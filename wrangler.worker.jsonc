@@ -1,0 +1,17 @@
+// Sites 运行时（vinext + @cloudflare/vite-plugin）专用 Worker 配置。
+// 与根目录 wrangler.toml（PR1 的 Cloudflare Pages 历史配置）互不相干：
+// vite.config.js 显式指向本文件，避免插件发现并合并 Pages 配置里的同名 D1 绑定。
+// database_id 为本地 Miniflare 占位值；托管形态由 .openai/hosting.json 声明真实绑定。
+{
+  "name": "fluxledger-sites",
+  "main": "vinext/server/fetch-handler",
+  "compatibility_date": "2025-05-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fluxledger-d1",
+      "database_id": "00000000-0000-4000-8000-000000000000"
+    }
+  ]
+}
