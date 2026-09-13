@@ -38,7 +38,7 @@
 | 2 | 平台登录路由跳转-返回：`/signin-with-chatgpt?return_to=/` 302 回站，会话建立 | ✅ 通过（本地模拟身份） | whoami 返回 `{"userId":"local_seedy","email":"seedy@sites.test"}` |
 | 3 | 服务端按稳定 user id 向 D1 写入并读取测试记录 | ✅ 通过 | POST 201 `{id:1,userId:"local_seedy"}`；GET 返回按 user_id 过滤的记录 |
 | 4 | 退出后恢复匿名（游客本地模式不受影响） | ✅ 通过 | `/signout-with-chatgpt` 后 whoami 401 |
-| 5 | 重新部署（全新进程）后 D1 测试记录仍在 | ✅ 通过（本地 .wrangler/state） | 杀进程重启后 GET 返回原 2 条记录 |
+| 5 | 本地进程重启后 D1 测试记录仍在（**非托管重新部署**，后者见 #8） | ✅ 通过（本地 .wrangler/state） | 杀进程重启后 GET 返回原 2 条记录 |
 | 6 | 双账号数据隔离 | ⏳ 待托管环境 | 本地模拟只有单一身份 local_seedy，无法构造第二真实账号 |
 | 7 | 真实 ChatGPT 登录（真实 user id / email 头） | ⏳ 待托管环境 | 本地仅模拟身份 |
 | 8 | 生产/托管部署后的持久化与认证头注入 | ⏳ 待托管环境 | 由维护者在 Sites 平台执行 |
