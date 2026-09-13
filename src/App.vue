@@ -5,6 +5,7 @@ import { dictionary } from './locales';
 import { flowChart, repaymentChart } from './charts';
 import { bindFlowInteraction } from './flowInteraction';
 import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger, inferCreditExpenses } from './ledger';
+import { loadTransactions, saveTransactions, loadCards, saveCards, loadHiddenBuiltInCardIds, saveHiddenBuiltInCardIds, loadLanguage, saveLanguage, loadTheme, saveTheme } from './storage/local';
 import { navigationPages, transactionFilters, selectTransactionRows, flowTransactionFilter, transactionDescription } from './transactionView';
 import SourceChart from './components/SourceChart.vue';
 import FrequencyChart from './components/FrequencyChart.vue';
@@ -12,14 +13,13 @@ import EntryDialog from './components/EntryDialog.vue';
 import CardDialog from './components/CardDialog.vue';
 import DataManagerDialog from './components/DataManagerDialog.vue';
 
-const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}};
-const entries=ref(read('cascade-transactions-v1',seed));
-const hiddenBuiltInCardIds=ref(read('fluxledger-hidden-built-in-cards-v1',[]));
-const bankCards=ref(withBuiltInAccountCards(read('fluxledger-cards-v1',defaultCards),hiddenBuiltInCardIds.value));
+const entries=ref(loadTransactions(seed));
+const hiddenBuiltInCardIds=ref(loadHiddenBuiltInCardIds());
+const bankCards=ref(withBuiltInAccountCards(loadCards(defaultCards),hiddenBuiltInCardIds.value));
 entries.value=inferCreditExpenses(entries.value,bankCards.value);
 const entryDialog=ref(null), cardDialog=ref(null), dataDialog=ref(null), recordKind=ref('all');
-const language=ref(localStorage.getItem('cascade-language')||'en');
-const dark=ref(localStorage.getItem('cascade-theme')==='dark');
+const language=ref(loadLanguage());
+const dark=ref(loadTheme());
 const page=ref('Dashboard'), report=ref('Overview'), period=ref('month'), month=ref('2026-09');
 const cards=ref(bankCards.value.map(c=>c.id)), category=ref('All categories'), expanded=ref(false), chartType=ref('Sankey diagram'), search=ref('');
 const allAccountsSelected=computed(()=>cards.value.length===bankCards.value.length);
@@ -100,6 +100,9 @@ function loanCardFor(borrower, currentCardId) {
   if (existing) return existing.id;
   const card = { id: 'loan-'+Date.now(), name: borrower, last4: '', noLast4: true, network: '借款', accountType: 'Credit card', loanBorrower: borrower, color: '#627084' };
   bankCards.value.push(card);cards.value.push(card.id);
+  // Saved at the mutation site so the auto-created account also persists when
+  // transaction validation rejects the entry that triggered it (legacy behavior).
+  saveCards(bankCards.value);
   return card.id;
 }
 function saveEntry(entry){
@@ -107,29 +110,30 @@ function saveEntry(entry){
   if(entry.type==='credit'&&entry.description==='借款'&&entry.borrower){entry={...entry,card:loanCardFor(entry.borrower.trim(),entry.card),borrower:entry.borrower.trim()}}
   const existing=entries.value.some(e=>e.id===entry.id);
   try{entries.value=saveTransaction(entries.value,{...entry,id:entry.id??crypto.randomUUID()},bankCards.value)}catch(error){formError.value=error.message;return;}
+  saveTransactions(entries.value);
   entryDialog.value.close();if(entry.type==='repayment')repaymentMonth.value=entry.date.slice(0,7);month.value=entry.date.slice(0,7);if(recordKind.value!=='all')recordKind.value=entry.type;toast(existing?'Transaction updated':'Transaction saved on this device');
 }
 function saveCard(card){
   const isNew = !card.id;
   if(card.id){const index=bankCards.value.findIndex(c=>c.id===card.id);bankCards.value[index]=card;}
   else{card.id='card-'+Date.now();bankCards.value.push(card);cards.value.push(card.id)}
+  saveCards(bankCards.value);
   toast('Account saved');
   if(isNew&&isOnlineLoanAccount(card))entryDialog.value.open('credit',month.value+'-10',{card:card.id,description:card.name});
 }
 function removeCard(id){
   if(entries.value.some(entry=>entry.card===id||entry.toCard===id)){toast('Delete linked entries first');return}
   bankCards.value=bankCards.value.filter(card=>card.id!==id);cards.value=cards.value.filter(cardId=>cardId!==id);
-  if(isBuiltInAccountCard(id)&&!hiddenBuiltInCardIds.value.includes(id))hiddenBuiltInCardIds.value.push(id);
+  if(isBuiltInAccountCard(id)&&!hiddenBuiltInCardIds.value.includes(id)){hiddenBuiltInCardIds.value.push(id);saveHiddenBuiltInCardIds(hiddenBuiltInCardIds.value);}
+  saveCards(bankCards.value);
   toast('Account deleted');
 }
-function remove(entry){const next=entries.value.filter(e=>e.id!==entry.id);const error=validateLedger(next,bankCards.value);if(error){toast(error);return;}deleted.value=entry;entries.value=next;toast('Transaction deleted')}
-function undo(){if(deleted.value){try{entries.value=saveTransaction(entries.value,deleted.value,bankCards.value);deleted.value=null;notification.value=''}catch(error){toast(error.message)}}}
-function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.value=payload.hiddenBuiltInCardIds||[];bankCards.value=withBuiltInAccountCards(payload.cards,hiddenBuiltInCardIds.value);entries.value=inferCreditExpenses(entries.value,bankCards.value);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='all';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}}
-watch(bankCards,value=>localStorage.setItem('fluxledger-cards-v1',JSON.stringify(value)),{deep:true});
-watch(hiddenBuiltInCardIds,value=>localStorage.setItem('fluxledger-hidden-built-in-cards-v1',JSON.stringify(value)),{deep:true});
-watch(entries,value=>localStorage.setItem('cascade-transactions-v1',JSON.stringify(value)),{deep:true});
-watch(language,value=>{localStorage.setItem('cascade-language',value);document.documentElement.lang=value==='zh'?'zh-CN':'en';document.title=value==='zh'?'FluxLedger——回应每一次资金流动。':'FluxLedger — In tune with every money movement.'},{immediate:true});
-watch(dark,value=>{document.body.classList.toggle('dark',value);localStorage.setItem('cascade-theme',value?'dark':'light')},{immediate:true});
+function remove(entry){const next=entries.value.filter(e=>e.id!==entry.id);const error=validateLedger(next,bankCards.value);if(error){toast(error);return;}deleted.value=entry;entries.value=next;saveTransactions(entries.value);toast('Transaction deleted')}
+function undo(){if(deleted.value){try{entries.value=saveTransaction(entries.value,deleted.value,bankCards.value);saveTransactions(entries.value);deleted.value=null;notification.value=''}catch(error){toast(error.message)}}}
+function importData(payload){entries.value=payload.entries;hiddenBuiltInCardIds.value=payload.hiddenBuiltInCardIds||[];bankCards.value=withBuiltInAccountCards(payload.cards,hiddenBuiltInCardIds.value);entries.value=inferCreditExpenses(entries.value,bankCards.value);cards.value=bankCards.value.map(c=>c.id);deleted.value=null;search.value='';category.value='All categories';recordKind.value='all';filtersOpen.value=false;const latest=[...entries.value].filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date)).sort((a,b)=>b.date.localeCompare(a.date))[0];if(latest){month.value=latest.date.slice(0,7);period.value='month'}
+saveTransactions(entries.value);saveCards(bankCards.value);saveHiddenBuiltInCardIds(hiddenBuiltInCardIds.value);}
+watch(language,value=>{saveLanguage(value);document.documentElement.lang=value==='zh'?'zh-CN':'en';document.title=value==='zh'?'FluxLedger——回应每一次资金流动。':'FluxLedger — In tune with every money movement.'},{immediate:true});
+watch(dark,value=>{document.body.classList.toggle('dark',value);saveTheme(value)},{immediate:true});
 </script>
 
 <template>

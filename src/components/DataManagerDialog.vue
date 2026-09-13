@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue';
-import { createDataBackup, parseDataFile } from '../dataTransfer';
+import { exportBackup, parseImportFile } from '../storage/local';
 
 const props = defineProps({ entries: Array, cards: Array, hiddenBuiltInCardIds: Array, t: Function });
 const emit = defineEmits(['import', 'notify']);
@@ -14,7 +14,7 @@ function open() {
 }
 
 function exportData() {
-  const backup = createDataBackup(props.entries, props.cards, new Date(), props.hiddenBuiltInCardIds);
+  const backup = exportBackup(props.entries, props.cards, props.hiddenBuiltInCardIds, new Date());
   const url = URL.createObjectURL(new Blob([backup], { type: 'application/json;charset=utf-8' }));
   const link = document.createElement('a');
   link.href = url;
@@ -28,7 +28,7 @@ async function chooseFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   try {
-    pending.value = { ...parseDataFile(await file.text(), { cards: props.cards }), fileName: file.name };
+    pending.value = { ...parseImportFile(await file.text(), props.cards), fileName: file.name };
     error.value = '';
   } catch (reason) {
     pending.value = null;
