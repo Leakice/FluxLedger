@@ -33,16 +33,18 @@ async function readRow(userId: string) {
   return { data: JSON.parse(row.data) as unknown, version: row.version as number };
 }
 
-// GET：返回 {data, version}；无记录返回 {data: null, version: 0}；未认证 401 JSON。
+// GET：返回 {data, version, userId}；无记录返回 {data: null, version: 0}；未认证 401 JSON。
+// userId 是服务端认证身份回显：客户端用它核对「数据出处 = 当前会话」，关闭
+// whoami 通过后、GET 返回前会话切换导致另一账号数据落入本命名空间的竞态。
 export async function GET() {
   const user = await requireUser();
   if (!user) return unauthorized();
   try {
     const row = await readRow(user.userId);
     if (!row) {
-      return Response.json({ data: null, version: 0 }, { headers: NO_STORE });
+      return Response.json({ data: null, version: 0, userId: user.userId }, { headers: NO_STORE });
     }
-    return Response.json({ data: row.data, version: row.version }, { headers: NO_STORE });
+    return Response.json({ data: row.data, version: row.version, userId: user.userId }, { headers: NO_STORE });
   } catch {
     console.error("ledger read failed");
     return Response.json(INTERNAL_ERROR, { status: 500, headers: NO_STORE });

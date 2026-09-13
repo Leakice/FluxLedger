@@ -56,6 +56,7 @@ window.pr3WriteMark = async function pr3WriteMark(accountLabel) {
         hiddenBuiltInCardIds: base.hiddenBuiltInCardIds,
       },
       baseVersion: current.version,
+      expectedUserId: me.userId, // 服务端同一请求内的身份一致性校验（缺失会被 400 拒绝）
     }),
   });
   if (!put.ok) {

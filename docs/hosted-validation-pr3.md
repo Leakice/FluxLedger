@@ -84,10 +84,14 @@
 ## 7. 伪造认证头（不采信客户端身份）
 
 1. 登录 A 的页面上，控制台执行：
-   `await fetch('/api/ledger',{method:'PUT',headers:{'content-type':'application/json','oai-authenticated-user-id':'forged-user','oai-authenticated-user-email':'forged@test.invalid'},body:JSON.stringify({data:{transactions:[],cards:[],hiddenBuiltInCardIds:[]},baseVersion:9999})}).then(r=>r.json())`
-2. 判定：返回 409 且 `currentVersion` 等于 A 自己的真实版本（写入定位到 A 的真实行——服务端只用平台注入的身份头，伪造头不产生新归属）。whoami 不受影响。
+   `await fetch('/api/ledger',{method:'PUT',headers:{'content-type':'application/json','oai-authenticated-user-id':'forged-user','oai-authenticated-user-email':'forged@test.invalid'},body:JSON.stringify({data:{transactions:[],cards:[],hiddenBuiltInCardIds:[]},baseVersion:9999,expectedUserId:'forged-user'})}).then(r=>r.json())`
+2. 判定：返回 **403 identity mismatch**——伪造的 `expectedUserId` 与平台认证身份不一致，
+   服务端在同一请求内拒绝写入（归属只取认证头，`expectedUserId` 仅做一致性检查）。
+   `expectedUserId` 缺失或非字符串 → 400；whoami 不受伪造头影响。
 3. 匿名（无会话）带同样伪造头请求 → 401。**边界注记（沿用 d2）**：匿名 401 可能来自平台访问控制层而非应用层；
    本应用层只声明「以平台注入头为准」，不据此宣称所有入口均经应用校验。
+4. GET 响应带 `userId` 回显（同请求认证身份）：客户端核对数据出处与当前会话一致才落缓存，
+   两请求窗口内的账号切换不会把另一账号的数据装入当前缓存（单测锁定）。
 
 ## 8. 结果回填
 

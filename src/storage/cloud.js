@@ -44,6 +44,7 @@ let saveTimer = null;
 let activeFlush = null;
 let flushQueued = false;
 let editSeq = 0; // 工作副本变更序号：界定一次 flush 的保存范围
+let identityChanged = false; // 会话已判定失效：停止后续写入尝试，等待整页刷新重新引导
 let listeners = [];
 
 const emit = event => {
@@ -53,6 +54,13 @@ const emit = event => {
 };
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// 会话失效只通告一次：App 收到后整页刷新，重复事件与重试没有意义。
+const emitSessionChanged = () => {
+  if (identityChanged) return;
+  identityChanged = true;
+  emit('session-changed');
+};
 
 export function currentSession() {
   return session;
@@ -219,20 +227,19 @@ async function detectIdentity() {
   return { status: 'unknown' };
 }
 
-// 重读云端并覆盖工作副本。只在 409 冲突/未知基保护（用户会收到可恢复备份的明确提示）时调用。
-// 返回 'ok' | 'changed' | 'failed'。
-async function refreshFromCloud() {
+// 拉取云端文档（含身份门 + 响应身份核对）。返回 'ok'(含 body) | 'changed' | 'failed'。
+// GET 响应带服务端认证身份（userId 回显）：whoami 通过后、GET 返回前会话切换的竞态
+// 由同请求回显识别——不符的数据绝不写入当前命名空间。
+async function fetchCloudDocument() {
   const identity = await confirmIdentity();
   if (identity !== 'ok') return identity;
   try {
     const response = await cloudFetch('/api/ledger', { headers: { accept: 'application/json' } });
     if (!response.ok) return 'failed';
     const body = await response.json().catch(() => null);
-    session.version = toVersion(body && body.version);
-    if (body && body.data && validateLedgerDocument(body.data)) writeDocumentToCache(body.data);
-    else initEmptyDocument();
-    touchSyncedMeta(session.version);
-    return 'ok';
+    if (!body) return 'failed';
+    if (typeof body.userId === 'string' && body.userId !== session.userId) return 'changed';
+    return { status: 'ok', body };
   } catch {
     return 'failed';
   }
@@ -241,22 +248,41 @@ async function refreshFromCloud() {
 // 建立基线版本。绝不写工作副本（草稿与用户状态不可被 GET 丢弃）。
 // 返回 'ok' | 'changed' | 'failed'；版本写入 session.version。
 async function establishVersion() {
-  const identity = await confirmIdentity();
-  if (identity !== 'ok') return identity;
+  const fetched = await fetchCloudDocument();
+  if (fetched === 'changed' || fetched === 'failed') return fetched;
+  session.version = toVersion(fetched.body.version);
+  return 'ok';
+}
+
+// 冲突备份：严格写入（配额/IO 失败或读回不符都判失败），成功才算数。
+function writeConflictBackupStrict(doc, baseVersion) {
+  if (!cloudBackend) return false;
   try {
-    const response = await cloudFetch('/api/ledger', { headers: { accept: 'application/json' } });
-    if (!response.ok) return 'failed';
-    const body = await response.json().catch(() => null);
-    session.version = toVersion(body && body.version);
-    return 'ok';
+    const value = JSON.stringify({ doc, baseVersion, at: new Date().toISOString() });
+    cloudBackend.setItem(CONFLICT_KEY, value);
+    return cloudBackend.getItem(CONFLICT_KEY) === value; // 写后读回校验
   } catch {
-    return 'failed';
+    return false;
   }
 }
 
-// 409/未知基保护：被云端版本取代前，把工作副本备份为可恢复副本（不静默丢弃唯一未保存副本）。
-function backupConflictedCopy(payload, attemptedBaseVersion) {
-  writeMeta(CONFLICT_KEY, { doc: payload, baseVersion: attemptedBaseVersion, at: new Date().toISOString() });
+// 409 / 未知基的冲突解决。顺序不可变：先取云端（不落盘）→ 备份缓存中「完整最新草稿」
+// （含慢 PUT 期间的新编辑）且确认写成功 → 才允许用云端覆盖工作副本。任何一步失败都
+// 保留原草稿并报失败，绝不丢弃唯一未保存副本、绝不静默覆盖云端。
+// 返回 'ok'（已发 conflict 事件）| 'changed' | 'failed'。
+async function resolveConflict(attemptedBaseVersion) {
+  const fetched = await fetchCloudDocument();
+  if (fetched === 'changed' || fetched === 'failed') return fetched;
+  const latest = readCacheDocument();
+  if (!validateLedgerDocument(latest)) return 'failed';
+  if (!writeConflictBackupStrict(latest, attemptedBaseVersion)) return 'failed';
+  session.version = toVersion(fetched.body.version);
+  if (fetched.body.data && validateLedgerDocument(fetched.body.data)) writeDocumentToCache(fetched.body.data);
+  else initEmptyDocument();
+  touchSyncedMeta(session.version);
+  clearDraft();
+  emit('conflict');
+  return 'ok';
 }
 
 export function hasConflictBackup() {
@@ -280,7 +306,7 @@ export function restoreConflictBackup() {
 }
 
 async function flushCloudSave() {
-  if (session.mode !== 'cloud') return;
+  if (session.mode !== 'cloud' || identityChanged) return;
   const seqAtSnapshot = editSeq;
   const payload = readCacheDocument();
   if (!validateLedgerDocument(payload)) {
@@ -290,7 +316,7 @@ async function flushCloudSave() {
   const identity = await confirmIdentity();
   if (identity === 'changed') {
     // 浏览器会话已换成别的账号（或已登出）：旧页面的工作副本绝不能再提交。
-    emit('session-changed');
+    emitSessionChanged();
     return;
   }
   if (identity === 'unknown') {
@@ -302,7 +328,7 @@ async function flushCloudSave() {
   if (session.version === null) {
     // 基线未知（离线启动且无同步记录，或未知基草稿）：先取云端基线。
     const established = await establishVersion();
-    if (established === 'changed') { emit('session-changed'); return; }
+    if (established === 'changed') { emitSessionChanged(); return; }
     if (established === 'failed') { emit('save-failed'); return; }
     const draftBase = draftBaseVersion();
     if (draftBase !== null) {
@@ -310,17 +336,11 @@ async function flushCloudSave() {
       // 绝不把旧草稿 rebase 到最新版本。
       session.version = draftBase;
     } else if (session.version > 0) {
-      // 未知基草稿 + 云端已有数据：无法判定草稿是否基于旧数据，按冲突保护处理。
-      const refreshed = await refreshFromCloud();
-      if (refreshed === 'ok') {
-        backupConflictedCopy(payload, null);
-        clearDraft();
-        emit('conflict');
-      } else if (refreshed === 'changed') {
-        emit('session-changed');
-      } else {
-        emit('save-failed');
-      }
+      // 未知基草稿 + 云端已有数据：无法判定草稿是否基于旧数据，按冲突保护处理
+      // （备份最新工作副本 → 工作副本转为云端状态 → 用户可显式恢复）。
+      const outcome = await resolveConflict(null);
+      if (outcome === 'changed') emitSessionChanged();
+      else if (outcome === 'failed') emit('save-failed');
       return;
     }
     // session.version === 0：云端为空，草稿以新建身份上传。
@@ -346,24 +366,17 @@ async function flushCloudSave() {
       return;
     }
     if (response.status === 409) {
-      // 乐观锁冲突：云端有更新的版本。工作副本先备份为可恢复副本（不丢弃唯一未保存副本），
-      // 再重读云端覆盖缓存并通知 UI 重载内存状态——旧页面不得借新版本号回写过期集合。
-      const attemptedBaseVersion = session.version;
-      const refreshed = await refreshFromCloud();
-      if (refreshed === 'ok') {
-        backupConflictedCopy(payload, attemptedBaseVersion);
-        clearDraft();
-        emit('conflict');
-      } else if (refreshed === 'changed') {
-        emit('session-changed');
-      } else {
-        emit('save-failed'); // 重读失败：草稿原样保留
-      }
+      // 乐观锁冲突：云端有更新的版本。解决顺序（不可变）：
+      // 取云端（不落盘）→ 备份缓存中的完整最新草稿（含慢 PUT 期间的新编辑，写成功才算）
+      // → 才用云端覆盖工作副本并通知 UI 重载。备份失败则草稿原样保留、绝不覆盖。
+      const outcome = await resolveConflict(session.version);
+      if (outcome === 'changed') emitSessionChanged();
+      else if (outcome === 'failed') emit('save-failed');
       return;
     }
     if (response.status === 403) {
       // 服务端同一请求内的身份一致性校验未通过（whoami 与 PUT 之间发生了账号切换）。
-      emit('session-changed');
+      emitSessionChanged();
       return;
     }
     emit('save-failed');
@@ -409,6 +422,7 @@ export async function bootstrapCloud({ fetch = defaultFetch, debounce: debounceO
   if (debounceOverride !== undefined) debounceMs = debounceOverride;
   if (retryDelay !== undefined) retryDelayMs = retryDelay;
   cloudFetch = fetch;
+  identityChanged = false;
   const identity = await detectIdentity();
   if (identity.status === 'anonymous') {
     resetToGuest();
@@ -448,6 +462,13 @@ export async function bootstrapCloud({ fetch = defaultFetch, debounce: debounceO
       return session;
     }
     const body = await response.json().catch(() => null);
+    if (typeof body?.userId === 'string' && body.userId !== session.userId) {
+      // whoami 通过后、GET 返回前会话已切换：云端数据属于另一账号，绝不写入本命名空间。
+      // 工作副本保持本地状态、版本沿用上次同步记录；下一次保存的身份门会收敛（session-changed）。
+      session.version = syncedVersion();
+      session.boot = 'offline';
+      return session;
+    }
     session.version = toVersion(body && body.version);
     if (body && body.data && validateLedgerDocument(body.data)) {
       writeDocumentToCache(body.data);
@@ -503,6 +524,7 @@ export function __resetForTest() {
   flushQueued = false;
   hydrating = false;
   editSeq = 0;
+  identityChanged = false;
   listeners = [];
   setSessionBackend(null);
   cloudBackend = null;

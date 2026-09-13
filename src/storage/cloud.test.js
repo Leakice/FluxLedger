@@ -405,3 +405,113 @@ test('flushNow resolves only after the working copy reached the cloud (or gave u
 test('different accounts never share cache keys', () => {
   assert.notEqual(nsKey(USER_A, KEYS.transactions), nsKey(USER_B, KEYS.transactions));
 });
+
+test('a slow PUT that lands on 409 backs up the complete latest draft (including in-flight edits)', async () => {
+  globalThis.localStorage = mapStorage();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const remoteV2 = { data: cloudDocument([entry('remote-v2')]), userId: USER_A, version: 2 };
+  const { fetch, calls } = fakeApi({
+    whoami: asUser(USER_A),
+    ledger: (count, options) => {
+      if (count === 1) return { body: { data: cloudDocument([]), userId: USER_A, version: 1 } };
+      if (options.method !== 'PUT') return { body: { ...remoteV2 } };
+      if (count === 2) return gate.then(() => ({ status: 409, body: { currentVersion: 2, currentData: remoteV2.data } }));
+      return { body: { version: 3 } };
+    },
+  });
+  await bootstrapCloud({ fetch, debounce: 5 });
+  const events = [];
+  onCloudEvent(event => events.push(event));
+
+  saveTransactions([entry('edit-before-put')]);
+  await sleep(15); // 第一次 flush 进入慢 PUT（基版本 1）
+  saveTransactions([entry('edit-before-put'), entry('edit-during-put')]);
+  await sleep(15); // 编辑入队
+  release();
+  await sleep(60); // PUT 409 → 冲突解决
+
+  const backup = getConflictBackup();
+  assert.ok(backup, 'a restorable backup exists');
+  assert.ok(backup.doc.transactions.some(e => e.id === 'edit-before-put'));
+  assert.ok(backup.doc.transactions.some(e => e.id === 'edit-during-put'), 'the in-flight edit is NOT lost');
+  assert.equal(backup.baseVersion, 1);
+  assert.deepEqual(loadTransactions(), [entry('remote-v2')], 'working copy mirrors the cloud');
+  assert.equal(currentSession().version, 3, 'the queued follow-up flush echoes the mirrored cloud state back');
+  assert.equal(hasPendingDraft(), false);
+  assert.deepEqual(events, ['conflict']);
+});
+
+test('a failed conflict backup keeps the working copy and draft (never discards without a backup)', async () => {
+  const base = mapStorage();
+  const storage = Object.create(base, {
+    setItem: { value(key, value) {
+      if (key.endsWith('-conflict-doc')) throw new Error('QuotaExceededError');
+      base.setItem(key, value);
+    } },
+  });
+  globalThis.localStorage = storage;
+  const { fetch } = fakeApi({
+    whoami: asUser(USER_A),
+    ledger: (count, options) => (count === 1
+      ? { body: { data: cloudDocument([]), userId: USER_A, version: 1 } }
+      : options.method === 'PUT'
+        ? { status: 409, body: { currentVersion: 2, currentData: { data: cloudDocument([entry('remote-v2')]), userId: USER_A, version: 2 } } }
+        : { body: { data: cloudDocument([entry('remote-v2')]), userId: USER_A, version: 2 } }),
+  });
+  await bootstrapCloud({ fetch, debounce: 5 });
+  const events = [];
+  onCloudEvent(event => events.push(event));
+
+  saveTransactions([entry('only-draft')]);
+  await flushNow();
+
+  assert.equal(hasConflictBackup(), false, 'the backup write failed');
+  assert.equal(hasPendingDraft(), true, 'the draft is untouched');
+  assert.deepEqual(loadTransactions(), [entry('only-draft')], 'the working copy was never overwritten');
+  assert.ok(events.length >= 1 && events.every(event => event === 'save-failed'),
+    'every retry reports the failure honestly (flushNow retries while a draft remains)');
+});
+
+test('a boot GET whose identity echo belongs to another account never enters the namespace', async () => {
+  const storage = mapStorage();
+  globalThis.localStorage = storage;
+  const { fetch } = fakeApi({
+    whoami: asUser(USER_A),
+    ledger: (count) => (count === 1
+      ? { body: { data: cloudDocument([entry('b-private')]), userId: USER_B, version: 2 } } // 启动 GET 前会话已切换：响应身份回显是 B
+      : { body: { data: cloudDocument([]), userId: USER_A, version: 1 } }),
+  });
+
+  const session = await bootstrapCloud({ fetch });
+
+  assert.deepEqual(loadTransactions(), [], 'B’s data never enters A’s namespace');
+  assert.equal(session.boot, 'offline', 'boot converges safely; the next identity gate resolves the session');
+  assert.equal(session.version, null);
+  saveTransactions([entry('local-a-edit')]);
+  assert.ok(storage.getItem(nsKey(USER_A, KEYS.transactions)), 'edits keep landing in A’s own namespace');
+});
+
+test('a conflict refresh with another account’s echo aborts as session-changed without touching the draft', async () => {
+  globalThis.localStorage = mapStorage();
+  const { fetch, calls } = fakeApi({
+    whoami: asUser(USER_A),
+    ledger: (count, options) => {
+      if (count === 1) return { body: { data: cloudDocument([]), userId: USER_A, version: 1 } };
+      if (options.method === 'PUT') return { status: 409, body: { currentVersion: 2, currentData: { data: cloudDocument([entry('b-private')]), userId: USER_B, version: 2 } } };
+      return { body: { data: cloudDocument([entry('b-private')]), userId: USER_B, version: 2 } }; // 冲突重读时身份已是 B
+    },
+  });
+  await bootstrapCloud({ fetch, debounce: 5 });
+  const events = [];
+  onCloudEvent(event => events.push(event));
+
+  const draft = [entry('my-draft')];
+  saveTransactions(draft);
+  await flushNow();
+
+  assert.deepEqual(events, ['session-changed']);
+  assert.equal(hasConflictBackup(), false, 'another account’s data is never backed up into A’s namespace');
+  assert.deepEqual(loadTransactions(), draft, 'the working copy is untouched');
+  assert.equal(hasPendingDraft(), true);
+});
