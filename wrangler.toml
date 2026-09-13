@@ -1,0 +1,17 @@
+# FluxLedger Cloudflare 配置（PR1 云端化 spike）
+#
+# 站点形态结论（详见 docs/cloud-deployment.md）：
+#   现有线上站点（leakice.cn）由 OpenAI Codex Sites（chatgpt.site）托管，
+#   域名经 Cloudflare 代理；Cloudflare 侧为全新项目，本仓库采用
+#   Cloudflare Pages 形态：dist/ 为 SPA 静态资源，functions/ 目录用
+#   Pages Functions 提供 API，SPA fallback 由 Pages 默认提供。
+name = "fluxledger"
+compatibility_date = "2025-05-05"
+pages_build_output_dir = "dist"
+
+# D1 binding：Pages Functions / 前端构建均不直接引用，Functions 代码通过 env.DB 访问
+[[d1_databases]]
+binding = "DB"
+database_name = "fluxledger-d1"
+database_id = "f1be9272-87bd-41df-a5d3-85e8286696c0"
+migrations_dir = "migrations"

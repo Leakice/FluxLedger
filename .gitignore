@@ -5,3 +5,6 @@ dist/
 .env
 .env.*
 !.env.example
+
+# wrangler 本地状态（D1 本地数据库、缓存）
+.wrangler/
