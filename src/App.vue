@@ -6,6 +6,8 @@ import { flowChart, repaymentChart } from './charts';
 import { bindFlowInteraction } from './flowInteraction';
 import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger, inferCreditExpenses } from './ledger';
 import { loadTransactions, saveTransactions, loadCards, saveCards, loadHiddenBuiltInCardIds, saveHiddenBuiltInCardIds, loadLanguage, saveLanguage, loadTheme, saveTheme } from './storage/local';
+import { currentSession, onCloudEvent, signOutLocalCleanup } from './storage/cloud';
+import { maskedUserId } from './storage/uidHash';
 import { navigationPages, transactionFilters, selectTransactionRows, flowTransactionFilter, transactionDescription } from './transactionView';
 import SourceChart from './components/SourceChart.vue';
 import FrequencyChart from './components/FrequencyChart.vue';
@@ -27,6 +29,15 @@ const accountFilter=computed({get:()=>allAccountsSelected.value?'':cards.value.l
 const accountFilterLabel=computed(()=>allAccountsSelected.value?cards.value.length+'/'+bankCards.value.length:cards.value.length===1?cardName(cards.value[0]):t('Custom selection')+' ('+cards.value.length+')');
 const formError=ref('');
 const notification=ref(''), deleted=ref(null), filtersOpen=ref(false);
+// 登录态在 main.js 挂载前已确定（bootstrapCloud），此处只读快照；登录/退出都是整页导航。
+const cloudSession=currentSession();
+const accountMenuOpen=ref(false);
+const maskedId=()=>maskedUserId(cloudSession.userId||'');
+// 云端事件 → toast 文案（云端模块只发事件类型，文案与翻译留在 UI 层）。
+const cloudToastMessages={'save-failed':'Save failed','conflict':'Sync conflict — cloud data reloaded. Your changes remain on this page.'};
+const offCloudEvent=onCloudEvent(event=>{const message=cloudToastMessages[event];if(message)toast(message);});
+onBeforeUnmount(()=>{offCloudEvent();});
+function signOut(){accountMenuOpen.value=false;signOutLocalCleanup();}
 const asOf=computed(()=>periodEnd(month.value,period.value));
 const cardName=id=>{const card=bankCards.value.find(c=>c.id===id);return card?t(card.name)+(accountLast4(card)?' · '+accountLast4(card):''):id};
 const limitFor=id=>creditLimit(entries.value,id,asOf.value);
@@ -144,7 +155,16 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);saveTheme(value)
       <div class="language-switch" aria-label="Language / 语言"><button v-for="lang in ['en','zh']" :key="lang" :class="{selected:language===lang}" :aria-pressed="language===lang" @click="language=lang">{{ lang.toUpperCase() }}</button></div>
       <div class="theme-switch"><button :class="{selected:dark}" :title="t('Dark mode')" :aria-pressed="dark" @click="dark=true">☾</button><button :class="{selected:!dark}" :title="t('Light mode')" :aria-pressed="!dark" @click="dark=false">☼</button></div>
       <button class="icon notification" :aria-label="t('Notifications')" @click="toast('You’re all caught up. Your records are saved locally.')"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-2 7-2 9h16c0-2-2-2-2-9M9 21h6"/></svg><i/></button>
-      <button class="avatar" :title="t('Local account')" @click="toast('Local account · Data is stored in this browser')">QY</button>
+      <a v-if="cloudSession.mode!=='cloud'" class="chatgpt-signin" href="/signin-with-chatgpt?return_to=%2F" target="_top">{{ t('Sign in with ChatGPT') }}</a>
+      <div v-else class="account-menu">
+        <button class="avatar cloud-avatar" :aria-label="t('Cloud account')+' '+maskedId()" :aria-expanded="accountMenuOpen" :title="t('Cloud account')" @click.stop="accountMenuOpen=!accountMenuOpen">{{ maskedId() }}</button>
+        <div v-if="accountMenuOpen" class="account-menu-pop" role="menu">
+          <span class="account-menu-title">{{ t('Cloud account') }}</span>
+          <span class="account-menu-id">{{ maskedId() }}</span>
+          <a role="menuitem" href="/signout-with-chatgpt?return_to=%2F" target="_top" @click="signOut">{{ t('Sign out') }}</a>
+        </div>
+      </div>
+      <button v-if="cloudSession.mode!=='cloud'" class="avatar" :title="t('Local account')" @click="toast('Local account · Data is stored in this browser')">QY</button>
     </div>
   </header>
   <main>
