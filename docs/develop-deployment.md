@@ -1,5 +1,12 @@
 # develop 环境部署文档
 
+> **⚠️ 状态注记（2026-09-13，PR3 起）**：主工程构建形态已切换为 Sites 运行时
+> （vinext Worker，见 [sites-runtime-integration.md](sites-runtime-integration.md)）：
+> `npm run build` 产物为 `dist/client` + `dist/server` + `dist/.openai`（无单页
+> `index.html`），`npm run preview` 已由 `npm run start`（wrangler 本地预览）取代。
+> 本文描述的「纯静态目录 + SPA fallback」部署形态自 PR3 起不再适用；develop 环境
+> 的托管迁移（或恢复纯 SPA 出口）待维护者决策。npm test 与游客本地模式行为不受影响。
+
 本文用于将 FluxLedger 部署到 `develop` 环境。项目是纯前端 Vue 3 + Vite 应用，不需要后端服务或数据库。
 
 ## 部署前提

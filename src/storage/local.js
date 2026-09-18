@@ -5,7 +5,7 @@
 // semantics must stay byte-compatible with the pre-storage-module app.
 import { createDataBackup, parseDataFile } from '../dataTransfer.js';
 
-const KEYS = {
+export const KEYS = {
   transactions: 'cascade-transactions-v1',
   cards: 'fluxledger-cards-v1',
   hiddenBuiltInCardIds: 'fluxledger-hidden-built-in-cards-v1',
@@ -14,6 +14,15 @@ const KEYS = {
 };
 
 export const defaultBackend = () => globalThis.localStorage;
+
+// Session backend (PR3 cloud mode): src/storage/cloud.js installs a
+// per-account namespaced backend once the visitor signs in. Only the three
+// data keys ever consult it; language/theme stay device preferences on the
+// original keys. Guest mode never installs one, so all reads and writes keep
+// hitting the original keys byte-identically.
+let sessionBackend = null;
+export const setSessionBackend = backend => { sessionBackend = backend; };
+const dataBackend = () => sessionBackend ?? defaultBackend();
 
 // Original read() semantics: missing key, JSON null, invalid JSON and a
 // throwing getItem all fall back; other legal JSON values pass through
@@ -26,19 +35,19 @@ function readJson(key, fallback, backend) {
   }
 }
 
-export const loadTransactions = (fallback = [], backend = defaultBackend()) =>
+export const loadTransactions = (fallback = [], backend = dataBackend()) =>
   readJson(KEYS.transactions, fallback, backend);
-export const saveTransactions = (value, backend = defaultBackend()) =>
+export const saveTransactions = (value, backend = dataBackend()) =>
   backend.setItem(KEYS.transactions, JSON.stringify(value));
 
-export const loadCards = (fallback = [], backend = defaultBackend()) =>
+export const loadCards = (fallback = [], backend = dataBackend()) =>
   readJson(KEYS.cards, fallback, backend);
-export const saveCards = (value, backend = defaultBackend()) =>
+export const saveCards = (value, backend = dataBackend()) =>
   backend.setItem(KEYS.cards, JSON.stringify(value));
 
-export const loadHiddenBuiltInCardIds = (fallback = [], backend = defaultBackend()) =>
+export const loadHiddenBuiltInCardIds = (fallback = [], backend = dataBackend()) =>
   readJson(KEYS.hiddenBuiltInCardIds, fallback, backend);
-export const saveHiddenBuiltInCardIds = (value, backend = defaultBackend()) =>
+export const saveHiddenBuiltInCardIds = (value, backend = dataBackend()) =>
   backend.setItem(KEYS.hiddenBuiltInCardIds, JSON.stringify(value));
 
 // Language keeps its original raw-string encoding (no JSON wrapping) and the
