@@ -385,6 +385,74 @@ test('an unknown-base draft with a failing backup keeps conflict protection on r
   assert.equal(hasPendingDraft(), true, 'the draft keeps waiting for protection to be possible');
 });
 
+test('reaching the backup cap keeps every existing backup and the current draft (no silent eviction)', async () => {
+  globalThis.localStorage = mapStorage();
+  globalThis.sessionStorage = mapStorage();
+  const a = serverApi(cloudDocument([]), 1);
+  await bootstrapCloud({ fetch: a.fetch, debounce: 5 });
+
+  const events = [];
+  onCloudEvent(event => events.push(event));
+  // 连续 6 次冲突：前 5 次各追加一份备份，第 6 次达到上限
+  for (let round = 1; round <= 6; round += 1) {
+    saveTransactions([entry('draft-' + round)]);
+    a.s.data = cloudDocument([entry('remote-' + round)]);
+    a.s.version = round + 1;
+    events.length = 0;
+    await flushNow();
+  }
+
+  assert.equal(conflictBackupCount(), 5, 'the cap holds five backups');
+  assert.ok(a.s.data.transactions.some(e => e.id === 'remote-6'), 'the server still holds what round 6 seeded (no successful PUT ever landed)');
+  assert.ok(!a.s.data.transactions.some(e => e.id === 'draft-6'), 'the 6th conflict never overwrote the cloud');
+  assert.ok(events.includes('backup-limit'), 'the user is told to handle the backups');
+  assert.equal(hasPendingDraft(), true, 'the 6th draft is kept, waiting for the user');
+  assert.ok(loadTransactions().some(e => e.id === 'draft-6'), 'the 6th working copy is intact');
+  const backups = JSON.parse(sessionStorage.getItem('fluxledger-conflict-docs-' + uidHash(USER_A)));
+  assert.ok(backups.some(b => b.doc.transactions.some(e => e.id === 'draft-1')), 'draft-1 is still in the list (not evicted)');
+  assert.ok(backups.some(b => b.doc.transactions.some(e => e.id === 'draft-2')), 'draft-2 is still in the list (not evicted)');
+
+  // 用户恢复一份 → 列表腾出空间 → 下一次冲突可以继续备份
+  assert.equal(restoreConflictBackup(), true);
+  assert.equal(conflictBackupCount(), 4);
+});
+
+test('the first edit snapshots the complete three-key document (never spliced with other tabs’ shared data)', async () => {
+  const shared = mapStorage();
+  globalThis.localStorage = shared;
+  globalThis.sessionStorage = mapStorage();
+  const a = serverApi(cloudDocument([entry('seed-tx')]), 1);
+  await bootstrapCloud({ fetch: a.fetch, debounce: 60000 });
+
+  // 标签页 A 只编辑交易键
+  saveTransactions([entry('a-edit')]);
+
+  // 另一标签页删除账户并同步：共享基础的 cards 变了
+  const mutated = cloudDocument([entry('seed-tx'), entry('a-edit')]);
+  mutated.cards = [];
+  a.s.data = mutated;
+  a.s.version = 2;
+  shared.setItem('cloud-cache-' + uidHash(USER_A) + '-cascade-transactions-v1', JSON.stringify(mutated.transactions));
+  shared.setItem('cloud-cache-' + uidHash(USER_A) + '-fluxledger-cards-v1', JSON.stringify([]));
+
+  // A 刷新：完整草稿保留（含被另一标签页删除的账户），不与共享基础拼接
+  const session = await bootstrapCloud({ fetch: a.fetch, debounce: 5 });
+  assert.equal(session.version, 1, 'boot adopts the draft base');
+  const h = uidHash(USER_A);
+  assert.deepEqual(JSON.parse(sessionStorage.getItem('fluxledger-draft-' + h + '-cascade-transactions-v1')).map(e => e.id), ['a-edit'], 'the draft holds this tab’s working copy');
+  assert.deepEqual(JSON.parse(sessionStorage.getItem('fluxledger-draft-' + h + '-fluxledger-cards-v1')).map(c => c.id), ['c9'], 'the account deleted in another tab is still in this tab’s complete draft');
+  assert.deepEqual(loadCards().map(c => c.id), ['c9'], 'reads come from the complete draft, not the spliced shared base');
+
+  // 后续冲突备份也是完整文档
+  a.s.data = cloudDocument([entry('remote-newer')]);
+  a.s.data.cards = [];
+  a.s.version = 3;
+  await flushNow();
+  const backup = getConflictBackup();
+  assert.ok(backup, 'conflict resolution ran');
+  assert.ok(backup.doc.cards.some(c => c.id === 'c9'), 'the backup carries the complete document, including the account');
+});
+
 test('a second conflict appends a backup instead of overwriting the unhandled first one', async () => {
   globalThis.localStorage = mapStorage();
   globalThis.sessionStorage = mapStorage();

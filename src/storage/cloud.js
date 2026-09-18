@@ -154,9 +154,24 @@ export function hasPendingDraft() {
   return DATA_KEYS.some(key => tab.getItem(DRAFT_PREFIX + session.uidHash + '-' + key) !== null);
 }
 
+// 确保本页草稿是完整的三键文档：缺哪键就用「当前生效值」（无草稿的键读共享基础）
+// 补齐。这样首次编辑即冻结与基版本对应的完整快照，后续读取绝不与其他标签页
+// 推进的共享基础拼接（否则未修改的键会拼进他页的新数据，冲突备份也会残缺）。
+function ensureCompleteTabDraft() {
+  if (session.mode !== 'cloud' || !session.uidHash) return;
+  const tab = tabStore();
+  for (const key of DATA_KEYS) {
+    const draftKey = DRAFT_PREFIX + session.uidHash + '-' + key;
+    if (tab.getItem(draftKey) !== null) continue;
+    const value = cloudBackend ? cloudBackend.getItem(key) : null;
+    try { tab.setItem(draftKey, value === null ? '[]' : value); } catch { /* 由 flush 兜底 */ }
+  }
+}
+
 function markDirty() {
   if (session.mode !== 'cloud') return;
   editSeq += 1;
+  ensureCompleteTabDraft();
   markDraft();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -259,8 +274,10 @@ async function establishVersion() {
   return { status: 'ok', version: toVersion(fetched.body.version) };
 }
 
-// 冲突备份：多份 append-only 列表（上限 MAX_CONFLICT_BACKUPS，溢出丢弃最旧），
+// 冲突备份：多份 append-only 列表（上限 MAX_CONFLICT_BACKUPS；达上限不淘汰，
 // 严格写入（异常透传）+ 读回校验，成功才算数。
+// 返回 'ok'（写入成功）| 'full'（已达上限，不做任何写入）| 'error'（配额/IO 失败）。
+// 达到上限绝不自动淘汰最旧备份——那些是尚未被用户处理的唯一副本。
 function appendConflictBackupStrict(doc, baseVersion) {
   const tab = tabStore();
   let existing = [];
@@ -268,14 +285,14 @@ function appendConflictBackupStrict(doc, baseVersion) {
     const parsed = JSON.parse(tab.getItem(conflictKey()));
     if (Array.isArray(parsed)) existing = parsed;
   } catch { /* 损坏视为空列表 */ }
+  if (existing.length >= MAX_CONFLICT_BACKUPS) return 'full';
   existing.push({ doc, baseVersion, at: new Date().toISOString() });
-  while (existing.length > MAX_CONFLICT_BACKUPS) existing.shift();
   try {
     const value = JSON.stringify(existing);
     tab.setItem(conflictKey(), value);            // 配额/IO 异常必须就地消化
-    return tab.getItem(conflictKey()) === value;  // 写后读回校验
+    return tab.getItem(conflictKey()) === value ? 'ok' : 'error';  // 写后读回校验
   } catch {
-    return false;
+    return 'error';
   }
 }
 
@@ -329,7 +346,13 @@ async function resolveConflict(attemptedBaseVersion, fetched = null) {
   }
   const latest = readCacheDocument();
   if (!validateLedgerDocument(latest)) return 'failed';
-  if (!appendConflictBackupStrict(latest, attemptedBaseVersion)) return 'failed';
+  const backupOutcome = appendConflictBackupStrict(latest, attemptedBaseVersion);
+  if (backupOutcome === 'full') {
+    // 备份列表已满：保留现有全部备份与当前草稿，云端保持不动，提示用户先处理。
+    emit('backup-limit');
+    return 'failed';
+  }
+  if (backupOutcome !== 'ok') return 'failed';
   session.version = toVersion(fetched.body.version); // 仅在备份确认成功后采纳云端版本
   if (fetched.body.data && validateLedgerDocument(fetched.body.data)) writeSharedDocument(fetched.body.data);
   else writeSharedDocument(buildLedgerDocument([], [], []));
