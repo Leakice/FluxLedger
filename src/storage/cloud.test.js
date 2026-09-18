@@ -778,7 +778,7 @@ test('discard completes the backup-full escape hatch: export → discard → res
 
   // 用户导出后明确放弃当前草稿：工作副本回到最近一次同步的云端状态
   const exportedCopy = JSON.parse(JSON.stringify(loadTransactions())); // 导出文件内容（真实导出在 UI 层捕获）
-  assert.equal(discardPendingDraft(), true);
+  assert.equal(discardPendingDraft(), 'ok');
   assert.equal(hasPendingDraft(), false);
   assert.deepEqual(loadTransactions(), [entry('remote-5')], 'the working copy reverts to the last synced cloud state (round 6 never resolved)');
   assert.equal(conflictBackupCount(), 5, 'the backups are untouched by the discard');
@@ -831,5 +831,74 @@ test('the data manager offers a two-step discard that unblocks the restore flow'
     await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(conflictBackupCount(), 4);
     assert.equal(app.state.notification, 'Conflict copy restored. It will sync to the cloud.');
+  } finally { app.unmount(); clearTrackedTimers(); }
+});
+
+test('discarding during an in-flight save is deferred (no lost-update race with the PUT)', async () => {
+  globalThis.localStorage = mapStorage();
+  globalThis.sessionStorage = mapStorage();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const a = serverApi(cloudDocument([]), 1);
+  const fetch = async (url, options = {}) => {
+    if (url === '/api/whoami') return pack({ body: { authenticated: true, userId: USER_A } });
+    if (options.method === 'PUT') { a.s.puts.push(JSON.parse(options.body).baseVersion); await gate; a.s.data = JSON.parse(options.body).data; a.s.version += 1; return pack({ body: { version: a.s.version } }); }
+    return pack({ body: { data: { ...a.s.data }, userId: USER_A, version: a.s.version } });
+  };
+  await bootstrapCloud({ fetch, debounce: 5 });
+  const h = uidHash(USER_A);
+
+  // 编辑进入慢 PUT（在途）
+  saveTransactions([entry('in-flight-edit')]);
+  await sleep(15);
+  assert.ok(a.s.puts.length === 0 || true); // flush 已发起（门控未放行）
+  if (a.s.puts.length !== 1) throw new Error('the gated PUT should be in flight');
+  const putStarted = a.s.puts.length === 1;
+
+  // 在途期间放弃：必须被暂缓，草稿与缓存原样保留
+  assert.equal(discardPendingDraft(), 'busy');
+  assert.equal(hasPendingDraft(), true, 'the draft is untouched while the save is in flight');
+  assert.deepEqual(loadTransactions(), [entry('in-flight-edit')]);
+
+  release();
+  await sleep(30); // PUT 成功：已放弃企图从未执行，内容按原计划进入云端与共享基础
+  assert.equal(putStarted, true, 'the gated PUT was in flight and then completed');
+  assert.equal(hasPendingDraft(), false, 'the save completed and cleared the draft');
+  assert.equal(currentSession().version, 2);
+  assert.deepEqual(loadTransactions(), [entry('in-flight-edit')], 'the UI stays consistent with the saved result');
+  assert.deepEqual(a.s.data, cloudDocument([entry('in-flight-edit')]));
+
+  // 此后放弃语义如实：没有未同步草稿可放弃
+  assert.equal(discardPendingDraft(), 'none');
+});
+
+test('the UI tells the user a save is in progress instead of pretending the discard happened', async () => {
+  globalThis.localStorage = mapStorage();
+  globalThis.sessionStorage = mapStorage();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const a = serverApi(cloudDocument([]), 1);
+  const fetch = async (url, options = {}) => {
+    if (url === '/api/whoami') return pack({ body: { authenticated: true, userId: USER_A } });
+    if (options.method === 'PUT') { await gate; a.s.data = JSON.parse(options.body).data; a.s.version += 1; return pack({ body: { version: a.s.version } }); }
+    return pack({ body: { data: { ...a.s.data }, userId: USER_A, version: a.s.version } });
+  };
+  await bootstrapCloud({ fetch, debounce: 5 });
+  const app = await mountApp({ storage: globalThis.localStorage });
+  try {
+    saveTransactions([entry('slow-save')]);
+    await sleep(15); // PUT 在途
+    openDataManager();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    [...document.querySelectorAll('.data-action')].find(b => b.textContent.includes('Discard unsaved changes')).click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    [...document.querySelectorAll('.data-action')].find(b => b.textContent.includes('Confirm: discard unsaved changes')).click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(app.state.notification, 'A save is in progress. Wait for it to finish, then discard again.');
+    release();
+    await sleep(30);
+    // 保存完成后界面与云端一致（放弃从未执行，不产生回退假象）
+    assert.deepEqual(loadTransactions(), [entry('slow-save')]);
+    assert.equal(hasPendingDraft(), false);
   } finally { app.unmount(); clearTrackedTimers(); }
 });

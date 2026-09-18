@@ -75,9 +75,14 @@ function restoreConflictCopy(){
 // 用户在数据管理中两步确认后放弃本页未同步草稿（前提是已导出）：工作副本回到
 // 最近一次同步的云端状态，恢复入口解锁，备份逐份恢复的流程可以走通。
 function discardDraftCopy(){
-  if(discardPendingDraft()){
+  const outcome=discardPendingDraft();
+  if(outcome==='ok'){
     reloadWorkingCopy();
+    conflictBackupAvailable.value=hasConflictBackup();
     toast('Unsaved changes discarded. You can restore your backup copies now.');
+  }else if(outcome==='busy'){
+    // 保存请求在途：暂缓放弃（此时放弃会与在途 PUT 竞态），如实提示稍候重试。
+    toast('A save is in progress. Wait for it to finish, then discard again.');
   }
 }
 // 退出登录：有未同步草稿或未恢复冲突副本时，先尝试同步（草稿）并保留命名空间

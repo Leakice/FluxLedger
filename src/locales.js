@@ -50,6 +50,7 @@
     'Revert this page to the last synced cloud state. Export first if you have not.':'把本页恢复到最近一次同步的云端状态。如尚未导出，请先导出。',
     'This cannot be undone. Your last export is the only copy.':'此操作不可撤销，您最近一次的导出将是唯一副本。',
     'Unsaved changes discarded. You can restore your backup copies now.':'未同步修改已放弃，现在可以逐份恢复备份副本。',
+    'A save is in progress. Wait for it to finish, then discard again.':'正在保存中，请等待完成后再放弃未同步修改。',
     'Offline: showing cached data. It will sync when you are back online.':'当前离线：正在显示缓存数据，恢复联网后将自动同步。',
     'Sign-in check failed. Running in local mode; changes will not reach the cloud.':'登录状态检测失败，暂以本地模式运行，修改不会同步到云端。',
     'Import for cloud accounts arrives with a later update. Export stays available.':'云端账户的导入功能将在后续版本提供，导出不受影响。',
