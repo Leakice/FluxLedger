@@ -3,14 +3,27 @@ import { ref } from 'vue';
 import { exportBackup, parseImportFile } from '../storage/local';
 
 const props = defineProps({ entries: Array, cards: Array, hiddenBuiltInCardIds: Array, cloudMode: Boolean, conflictAvailable: Boolean, t: Function });
-const emit = defineEmits(['import', 'notify', 'restore-conflict']);
+const emit = defineEmits(['import', 'notify', 'restore-conflict', 'discard-draft']);
 const dialog = ref(null), fileInput = ref(null), pending = ref(null), error = ref('');
+// 放弃草稿的两步确认：第一次点击只进入确认态（可再次点击取消确认），
+// 第二次点击才真正 emit——确保用户在导出后明确放弃，绝不误触丢数据。
+const discardArmed = ref(false);
 
 function open() {
   pending.value = null;
   error.value = '';
+  discardArmed.value = false;
   if (fileInput.value) fileInput.value.value = '';
   dialog.value.showModal();
+}
+
+function discardClick() {
+  if (!discardArmed.value) {
+    discardArmed.value = true;
+    return;
+  }
+  discardArmed.value = false;
+  emit('discard-draft');
 }
 
 function exportData() {
@@ -80,6 +93,11 @@ defineExpose({ open });
       <button v-if="cloudMode&&conflictAvailable" type="button" class="data-action" @click="emit('restore-conflict')">
         <span class="data-action-icon import" aria-hidden="true">↺</span>
         <span class="data-action-copy"><strong>{{ t('Restore unsaved copy') }}</strong><small>{{ t('Put your unsaved changes from the last sync conflict back into the ledger.') }}</small></span>
+        <span class="data-action-arrow" aria-hidden="true">↗</span>
+      </button>
+      <button v-if="cloudMode" type="button" class="data-action" :class="{ 'discard-armed': discardArmed }" @click="discardClick">
+        <span class="data-action-icon import" aria-hidden="true">↺</span>
+        <span class="data-action-copy"><strong>{{ t(discardArmed ? 'Confirm: discard unsaved changes' : 'Discard unsaved changes') }}</strong><small>{{ t(discardArmed ? 'This cannot be undone. Your last export is the only copy.' : 'Revert this page to the last synced cloud state. Export first if you have not.') }}</small></span>
         <span class="data-action-arrow" aria-hidden="true">↗</span>
       </button>
     </div>

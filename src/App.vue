@@ -6,7 +6,7 @@ import { flowChart, repaymentChart } from './charts';
 import { bindFlowInteraction } from './flowInteraction';
 import { defaultCards, entryKinds, creditLimit, periodEnd, buildFlowModel, withBuiltInAccountCards, isBuiltInAccountCard, findLoanCard, accountLast4, accountProvider, isOnlineLoanAccount, canRecordIncome, creditPurchases, accountBalances, saveTransaction, validateLedger, inferCreditExpenses } from './ledger';
 import { loadTransactions, saveTransactions, loadCards, saveCards, loadHiddenBuiltInCardIds, saveHiddenBuiltInCardIds, loadLanguage, saveLanguage, loadTheme, saveTheme } from './storage/local';
-import { currentSession, onCloudEvent, signOutLocalCleanup, hasPendingDraft, hasConflictBackup, flushNow, restoreConflictBackup } from './storage/cloud';
+import { currentSession, onCloudEvent, signOutLocalCleanup, hasPendingDraft, hasConflictBackup, flushNow, restoreConflictBackup, discardPendingDraft } from './storage/cloud';
 import { maskedUserId } from './storage/uidHash';
 import { navigationPages, transactionFilters, selectTransactionRows, flowTransactionFilter, transactionDescription } from './transactionView';
 import SourceChart from './components/SourceChart.vue';
@@ -44,8 +44,8 @@ function reloadWorkingCopy(){
   deleted.value=null;
 }
 const CONFLICT_NOTICE='Sync conflict — cloud data reloaded. Your unsaved changes were kept as a local backup.';
-const BACKUP_LIMIT_NOTICE='Sync backups are full. Restore your unsaved copies in Data management, then try again.';
-const RESTORE_BLOCKED_NOTICE='Sync backups are full and this page has unsaved changes. Export your data first, then restore copies one by one.';
+// 上限与恢复受阻是同一处境，指向同一条可完成的流程：导出 → 放弃本页草稿 → 逐份恢复。
+const BACKUP_LIMIT_NOTICE='Sync backups are full. Export your data, then use "Discard unsaved changes" in Data management before restoring copies.';
 const conflictBackupAvailable=ref(false);
 // 云端事件 → UI 反应（云端模块只发事件类型，文案与动作留在 UI 层）。
 const cloudActions={
@@ -67,9 +67,17 @@ function restoreConflictCopy(){
     conflictBackupAvailable.value=hasConflictBackup();
     toast('Conflict copy restored. It will sync to the cloud.');
   }else if(outcome==='full'){
-    // 备份已满且本页有未同步草稿：恢复被阻止，草稿安全保留，提示导出处理。
+    // 备份已满且本页有未同步草稿：恢复被阻止，草稿安全保留，指引走「导出 → 放弃 → 恢复」。
     conflictBackupAvailable.value=true;
-    toast(RESTORE_BLOCKED_NOTICE);
+    toast(BACKUP_LIMIT_NOTICE);
+  }
+}
+// 用户在数据管理中两步确认后放弃本页未同步草稿（前提是已导出）：工作副本回到
+// 最近一次同步的云端状态，恢复入口解锁，备份逐份恢复的流程可以走通。
+function discardDraftCopy(){
+  if(discardPendingDraft()){
+    reloadWorkingCopy();
+    toast('Unsaved changes discarded. You can restore your backup copies now.');
   }
 }
 // 退出登录：有未同步草稿或未恢复冲突副本时，先尝试同步（草稿）并保留命名空间
@@ -276,6 +284,6 @@ watch(dark,value=>{document.body.classList.toggle('dark',value);saveTheme(value)
   <footer><img class="footer-brand" src="/assets/logo-mini.svg" alt="QYNT" width="105" height="119"/><span>{{ t('A clear view of your financial world.') }}</span><a class="footer-contact" href="mailto:leakice@qq.com,2632364603@qq.com">{{ t('Contact us') }}</a></footer>
   <EntryDialog :entries="entries" :error="formError" ref="entryDialog" :cards="bankCards" :t="t" @save="saveEntry"/>
   <CardDialog ref="cardDialog" :t="t" @save="saveCard" @remove="removeCard"/>
-  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :cloud-mode="cloudSession.mode==='cloud'" :conflict-available="conflictBackupAvailable" :t="t" @import="importData" @notify="toast" @restore-conflict="restoreConflictCopy"/>
+  <DataManagerDialog ref="dataDialog" :entries="entries" :cards="bankCards" :hidden-built-in-card-ids="hiddenBuiltInCardIds" :cloud-mode="cloudSession.mode==='cloud'" :conflict-available="conflictBackupAvailable" :t="t" @import="importData" @notify="toast" @restore-conflict="restoreConflictCopy" @discard-draft="discardDraftCopy"/>
   <div class="toast" :class="{show:notification}" role="status">{{ t(notification) }}<button v-if="notification==='Transaction deleted'&&deleted" class="undo" @click="undo">{{ language==='zh'?'撤销':'Undo' }}</button><button v-if="notification===CONFLICT_NOTICE&&conflictBackupAvailable" class="undo" @click="restoreConflictCopy">{{ t('Restore my changes') }}</button></div>
 </template>

@@ -484,6 +484,17 @@ function runFlush() {
   return activeFlush;
 }
 
+// 用户显式放弃当前未同步草稿（UI 必须先提供导出并取得明确确认）：
+// 仅清本页草稿，工作副本回到共享基础（最近一次与云端确认的状态）；
+// 备份列表与云端数据不动。用于备份上限的死锁解脱：导出 → 放弃 → 逐份恢复。
+export function discardPendingDraft() {
+  if (session.mode !== 'cloud' || !hasPendingDraft()) return false;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  clearTabDraft();
+  return true;
+}
+
 // 立即同步（退出登录前的草稿保护）。有草稿时最多尝试 3 轮；失败由调用方决定去留。
 export async function flushNow() {
   clearTimeout(saveTimer);

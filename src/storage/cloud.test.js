@@ -11,7 +11,7 @@ import {
 import {
   bootstrapCloud, currentSession, onCloudEvent, hasPendingDraft, hasConflictBackup,
   conflictBackupCount, getConflictBackup, restoreConflictBackup, flushNow,
-  signOutLocalCleanup, __resetForTest,
+  discardPendingDraft, signOutLocalCleanup, __resetForTest,
 } from './cloud.js';
 import { mountApp, clearTrackedTimers } from '../appTestHelpers.js';
 
@@ -712,7 +712,7 @@ test('the UI surfaces the backup-limit notice instead of a generic failure', asy
     await flushNow();
     assert.equal(
       app.state.notification,
-      'Sync backups are full. Restore your unsaved copies in Data management, then try again.',
+      'Sync backups are full. Export your data, then use "Discard unsaved changes" in Data management before restoring copies.',
       'the backup-limit notice is shown, not Save failed',
     );
     assert.equal(conflictBackupCount(), 5);
@@ -737,7 +737,7 @@ test('a blocked restore shows the export guidance and keeps the restore entry av
     await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(
       app.state.notification,
-      'Sync backups are full and this page has unsaved changes. Export your data first, then restore copies one by one.',
+      'Sync backups are full. Export your data, then use "Discard unsaved changes" in Data management before restoring copies.',
       'the blocked-restore guidance is shown instead of a success message',
     );
     assert.equal(conflictBackupCount(), 5, 'nothing changed');
@@ -756,5 +756,80 @@ test('a successful restore keeps the entry while other backups remain', async ()
     assert.equal(app.state.notification, 'Conflict copy restored. It will sync to the cloud.');
     assert.equal(conflictBackupCount(), 1);
     assert.ok([...document.querySelectorAll('.data-action')].some(b => b.textContent.includes('Restore unsaved copy')), 'the entry stays for the remaining backup');
+  } finally { app.unmount(); clearTrackedTimers(); }
+});
+
+test('discard completes the backup-full escape hatch: export → discard → restore → sync', async () => {
+  const a = serverApi(cloudDocument([]), 1);
+  await bootstrapCloud({ fetch: a.fetch, debounce: 5 });
+
+  // 5 次冲突填满备份列表，第 6 次冲突保留当前草稿（复审复现的处境）
+  for (let round = 1; round <= 6; round += 1) {
+    saveTransactions([entry('draft-' + round)]);
+    a.s.data = cloudDocument([entry('remote-' + round)]);
+    a.s.version = round + 1;
+    await flushNow();
+  }
+  assert.equal(conflictBackupCount(), 5);
+  assert.equal(hasPendingDraft(), true);
+  assert.equal(restoreConflictBackup(), 'full', 'restore is blocked while the draft exists');
+  await flushNow();
+  assert.equal(a.s.puts.at(-1).baseVersion, 6, 'syncing is also blocked at the cap (no upload)');
+
+  // 用户导出后明确放弃当前草稿：工作副本回到最近一次同步的云端状态
+  const exportedCopy = JSON.parse(JSON.stringify(loadTransactions())); // 导出文件内容（真实导出在 UI 层捕获）
+  assert.equal(discardPendingDraft(), true);
+  assert.equal(hasPendingDraft(), false);
+  assert.deepEqual(loadTransactions(), [entry('remote-5')], 'the working copy reverts to the last synced cloud state (round 6 never resolved)');
+  assert.equal(conflictBackupCount(), 5, 'the backups are untouched by the discard');
+
+  // 恢复解锁：逐份恢复，恢复出的副本以上一次同步版本为基上传
+  assert.equal(restoreConflictBackup(), 'ok');
+  assert.deepEqual(loadTransactions(), [entry('draft-5')], 'the newest backup (round 5) can be restored');
+  await flushNow();
+  // 恢复出的副本上传时又遇 409（服务端在第 6 轮已推进）：被重新保护入列，绝不丢失
+  assert.equal(conflictBackupCount(), 5, 'the conflicted copy went back into the backup list');
+  assert.deepEqual(loadTransactions(), [entry('remote-6')], 'the working copy mirrors the cloud');
+
+  // 再次恢复：此时以最新云端版本为基，上传成功——流程可完成
+  assert.equal(restoreConflictBackup(), 'ok');
+  assert.deepEqual(loadTransactions(), [entry('draft-5')]);
+  await flushNow();
+  assert.equal(currentSession().version, 8, 'the restored copy syncs against the fresh cloud base');
+  assert.equal(conflictBackupCount(), 4, 'the remaining backups stay available for further restores');
+  void exportedCopy;
+});
+
+test('the data manager offers a two-step discard that unblocks the restore flow', async () => {
+  const a = serverApi(cloudDocument([]), 1);
+  const app = await mountWithBackups(a, 5); // 备份已满
+  try {
+    // 服务端推进到 v2，使本页草稿（基 1）的 PUT 落 409 并触达备份上限
+    a.s.data = cloudDocument([entry('remote-v2')]);
+    a.s.version = 2;
+    saveTransactions([entry('limit-edit')]);
+    await flushNow(); // backup-limit：恢复被阻止
+    assert.equal(app.state.notification, 'Sync backups are full. Export your data, then use "Discard unsaved changes" in Data management before restoring copies.');
+    openDataManager();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const discardButton = [...document.querySelectorAll('.data-action')].find(b => b.textContent.includes('Discard unsaved changes'));
+    assert.ok(discardButton, 'the discard action is available');
+    discardButton.click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const confirmButton = [...document.querySelectorAll('.data-action')].find(b => b.textContent.includes('Confirm: discard unsaved changes'));
+    assert.ok(confirmButton, 'the first click only arms the two-step confirmation');
+    confirmButton.click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(app.state.notification, 'Unsaved changes discarded. You can restore your backup copies now.');
+    assert.equal(hasPendingDraft(), false);
+    // 放弃后恢复解锁，且入口可用
+    openDataManager();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const restoreButton = [...document.querySelectorAll('.data-action')].find(b => b.textContent.includes('Restore unsaved copy'));
+    assert.ok(restoreButton, 'the restore entry is available after the discard');
+    restoreButton.click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(conflictBackupCount(), 4);
+    assert.equal(app.state.notification, 'Conflict copy restored. It will sync to the cloud.');
   } finally { app.unmount(); clearTrackedTimers(); }
 });
