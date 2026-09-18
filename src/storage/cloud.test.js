@@ -228,7 +228,7 @@ test('a 409 backs up the working copy, reloads the cloud version and offers reco
   assert.equal(getConflictBackup().baseVersion, 9, 'the backup records the attempted base');
   assert.deepEqual(events, ['conflict']);
 
-  assert.equal(restoreConflictBackup(), true);
+  assert.equal(restoreConflictBackup(), 'ok');
   assert.deepEqual(loadTransactions(), unsaved);
   assert.equal(hasPendingDraft(), true);
 });
@@ -257,7 +257,7 @@ test('an offline draft keeps its original base and conflicts instead of rebasing
   assert.equal(hasConflictBackup(), true);
   assert.deepEqual(getConflictBackup().doc.transactions, [entry('my-draft')]);
 
-  assert.equal(restoreConflictBackup(), true);
+  assert.equal(restoreConflictBackup(), 'ok');
   await flushNow();
   assert.equal(a.s.puts[1].baseVersion, 2, 'the restored copy uploads against the cloud base');
   assert.equal(hasPendingDraft(), false);
@@ -283,7 +283,7 @@ test('an unknown-base draft over cloud data becomes a conflict, never a silent o
   assert.equal(currentSession().version, 7);
   assert.equal(hasPendingDraft(), false);
 
-  assert.equal(restoreConflictBackup(), true);
+  assert.equal(restoreConflictBackup(), 'ok');
   await flushNow();
   assert.equal(currentSession().version, 8, 'the restored copy uploads against the established base');
 });
@@ -405,16 +405,79 @@ test('reaching the backup cap keeps every existing backup and the current draft 
   assert.equal(conflictBackupCount(), 5, 'the cap holds five backups');
   assert.ok(a.s.data.transactions.some(e => e.id === 'remote-6'), 'the server still holds what round 6 seeded (no successful PUT ever landed)');
   assert.ok(!a.s.data.transactions.some(e => e.id === 'draft-6'), 'the 6th conflict never overwrote the cloud');
-  assert.ok(events.includes('backup-limit'), 'the user is told to handle the backups');
+  assert.ok(events.length > 0 && events.every(event => event === 'backup-limit'),
+    'the user is told to handle the backups, with no generic failure masking it');
   assert.equal(hasPendingDraft(), true, 'the 6th draft is kept, waiting for the user');
   assert.ok(loadTransactions().some(e => e.id === 'draft-6'), 'the 6th working copy is intact');
   const backups = JSON.parse(sessionStorage.getItem('fluxledger-conflict-docs-' + uidHash(USER_A)));
   assert.ok(backups.some(b => b.doc.transactions.some(e => e.id === 'draft-1')), 'draft-1 is still in the list (not evicted)');
   assert.ok(backups.some(b => b.doc.transactions.some(e => e.id === 'draft-2')), 'draft-2 is still in the list (not evicted)');
 
-  // 用户恢复一份 → 列表腾出空间 → 下一次冲突可以继续备份
-  assert.equal(restoreConflictBackup(), true);
-  assert.equal(conflictBackupCount(), 4);
+  // 备份已满且当前有未同步草稿：恢复被阻止（UI 会提供导出等处理方式），一切保持原状
+  assert.equal(restoreConflictBackup(), 'full');
+  assert.equal(conflictBackupCount(), 5, 'the backups are untouched');
+  assert.equal(hasPendingDraft(), true, 'the current draft is untouched');
+  assert.ok(loadTransactions().some(e => e.id === 'draft-6'), 'the working copy is untouched');
+  assert.deepEqual(a.s.data.transactions.map(e => e.id), ['remote-6'], 'the cloud is untouched');
+});
+
+test('restoring protects the current unsynced draft (it becomes the newest backup, never a casualty)', async () => {
+  globalThis.localStorage = mapStorage();
+  globalThis.sessionStorage = mapStorage();
+  const a = serverApi(cloudDocument([]), 1);
+  await bootstrapCloud({ fetch: a.fetch, debounce: 5 });
+
+  // 第一次冲突：draft-1 进入备份，工作副本转为 remote-1（base 2）
+  saveTransactions([entry('draft-1')]);
+  a.s.data = cloudDocument([entry('remote-1')]);
+  a.s.version = 2;
+  await flushNow();
+
+  // 新的未同步草稿 draft-2（尚未备份）
+  saveTransactions([entry('draft-2')]);
+  assert.equal(hasPendingDraft(), true);
+
+  // 恢复旧备份：当前草稿必须先入备份列表，绝不覆盖
+  assert.equal(restoreConflictBackup(), 'ok');
+  assert.deepEqual(loadTransactions(), [entry('draft-1')], 'the backup content is restored');
+  assert.equal(conflictBackupCount(), 1, 'the list now holds the protected current draft');
+  assert.deepEqual(getConflictBackup().doc.transactions, [entry('draft-2')], 'draft-2 was preserved as the newest backup');
+  assert.equal(hasPendingDraft(), true);
+
+  // 恢复后的草稿以当前云端版本为基上传
+  await flushNow();
+  assert.equal(a.s.puts.at(-1).baseVersion, 2);
+  assert.equal(currentSession().version, 3);
+  assert.equal(hasPendingDraft(), false);
+
+  // 被保护的 draft-2 仍可恢复
+  assert.equal(restoreConflictBackup(), 'ok');
+  assert.deepEqual(loadTransactions(), [entry('draft-2')]);
+});
+
+test('restoring is blocked while the backup list is full and a draft exists (export first)', async () => {
+  globalThis.localStorage = mapStorage();
+  globalThis.sessionStorage = mapStorage();
+  const a = serverApi(cloudDocument([]), 1);
+  await bootstrapCloud({ fetch: a.fetch, debounce: 5 });
+
+  // 5 次冲突把备份列表填满，第 6 次冲突保留当前草稿
+  for (let round = 1; round <= 6; round += 1) {
+    saveTransactions([entry('draft-' + round)]);
+    a.s.data = cloudDocument([entry('remote-' + round)]);
+    a.s.version = round + 1;
+    await flushNow();
+  }
+  assert.equal(conflictBackupCount(), 5);
+  assert.equal(hasPendingDraft(), true);
+  const draftBefore = JSON.parse(sessionStorage.getItem('fluxledger-draft-' + uidHash(USER_A) + '-cascade-transactions-v1'));
+
+  // 备份已满 + 有未同步草稿：恢复被阻止，什么都不改
+  assert.equal(restoreConflictBackup(), 'full');
+  assert.equal(conflictBackupCount(), 5, 'the backups are untouched');
+  assert.equal(hasPendingDraft(), true, 'the current draft is untouched');
+  assert.deepEqual(JSON.parse(sessionStorage.getItem('fluxledger-draft-' + uidHash(USER_A) + '-cascade-transactions-v1')), draftBefore, 'the working copy is byte-identical');
+  assert.deepEqual(a.s.data.transactions.map(e => e.id), ['remote-6'], 'the cloud is untouched');
 });
 
 test('the first edit snapshots the complete three-key document (never spliced with other tabs’ shared data)', async () => {
@@ -473,11 +536,23 @@ test('a second conflict appends a backup instead of overwriting the unhandled fi
   assert.equal(conflictBackupCount(), 2, 'both unsaved copies are kept');
   assert.deepEqual(getConflictBackup().doc.transactions, [entry('second-draft')], 'restore offers the newest first');
 
-  assert.equal(restoreConflictBackup(), true);
+  // 恢复最新一份（此刻无草稿，直接替换）
+  assert.equal(restoreConflictBackup(), 'ok');
   assert.deepEqual(loadTransactions(), [entry('second-draft')]);
   assert.equal(conflictBackupCount(), 1, 'the restored backup is consumed');
-  assert.equal(restoreConflictBackup(), true);
-  assert.deepEqual(loadTransactions(), [entry('first-draft')], 'the older backup is still recoverable');
+
+  // 再恢复更早一份：当前工作副本（second-draft，已标记草稿）先受保护入列
+  assert.equal(restoreConflictBackup(), 'ok');
+  assert.deepEqual(loadTransactions(), [entry('first-draft')], 'the older backup is restored');
+  assert.equal(conflictBackupCount(), 1, 'the protected second-draft took its place in the list');
+  assert.deepEqual(getConflictBackup().doc.transactions, [entry('second-draft')]);
+
+  // 恢复出的 first-draft 以当前云端版本为基上传；second-draft 仍在备份中可再恢复
+  await flushNow();
+  assert.equal(a.s.puts.at(-1).baseVersion, 3);
+  assert.equal(currentSession().version, 4);
+  assert.equal(restoreConflictBackup(), 'ok');
+  assert.deepEqual(loadTransactions(), [entry('second-draft')]);
   assert.equal(conflictBackupCount(), 0);
 });
 

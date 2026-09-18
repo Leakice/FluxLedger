@@ -46,6 +46,7 @@
     'Put your unsaved changes from the last sync conflict back into the ledger.':'把上次同步冲突中未保存的修改放回账本。',
     'Conflict copy restored. It will sync to the cloud.':'冲突副本已恢复，将同步到云端。',
     'Sync backups are full. Restore your unsaved copies in Data management, then try again.':'同步冲突备份已达上限——请先在数据管理中恢复未同步副本，再重试。',
+    'Sync backups are full and this page has unsaved changes. Export your data first, then restore copies one by one.':'同步冲突备份已满，且本页有未同步修改——请先导出数据备份，再逐份恢复副本。',
     'Offline: showing cached data. It will sync when you are back online.':'当前离线：正在显示缓存数据，恢复联网后将自动同步。',
     'Sign-in check failed. Running in local mode; changes will not reach the cloud.':'登录状态检测失败，暂以本地模式运行，修改不会同步到云端。',
     'Import for cloud accounts arrives with a later update. Export stays available.':'云端账户的导入功能将在后续版本提供，导出不受影响。',

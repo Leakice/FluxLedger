@@ -319,26 +319,11 @@ export function getConflictBackup() {
   return latest && validateLedgerDocument(latest.doc) ? latest : null;
 }
 
-// 用户显式恢复：弹出最近一份备份写回工作副本（草稿路由，基版本 = 当前云端版本）。
-// 更早的备份保留在列表中，可继续逐份恢复。
-export function restoreConflictBackup() {
-  const backups = readConflictBackups();
-  if (!backups.length) return false;
-  const backup = backups[backups.length - 1];
-  if (!backup || !validateLedgerDocument(backup.doc)) return false;
-  cloudBackend.setItem(KEYS.transactions, JSON.stringify(backup.doc.transactions));
-  cloudBackend.setItem(KEYS.cards, JSON.stringify(backup.doc.cards));
-  cloudBackend.setItem(KEYS.hiddenBuiltInCardIds, JSON.stringify(backup.doc.hiddenBuiltInCardIds));
-  const remaining = backups.slice(0, -1);
-  try { tabStore().setItem(conflictKey(), JSON.stringify(remaining)); } catch { /* 忽略 */ }
-  return true;
-}
-
 // 409 / 未知基的冲突解决。顺序不可变：先取云端（不落盘）→ 严格备份本页完整最新
 // 工作副本（含慢 PUT 期间的新编辑，写成功才算）→ 确认成功才用云端覆盖共享基础、
-// 清本页草稿并通知 UI 重载。备份失败：共享基础与本页草稿都原样保留，只报失败——
+// 清本页草稿并通知 UI 重载。备份失败/达上限：共享基础与本页草稿都原样保留，
 // session.version 不被改动，未知基保护在下一次重试时继续保持。
-// 返回 'ok'（已发 conflict 事件）| 'changed' | 'failed'。
+// 返回 'ok'（已发 conflict 事件）| 'limit'（备份已满，已发 backup-limit）| 'changed' | 'failed'。
 async function resolveConflict(attemptedBaseVersion, fetched = null) {
   if (!fetched) {
     fetched = await fetchCloudDocument();
@@ -349,8 +334,9 @@ async function resolveConflict(attemptedBaseVersion, fetched = null) {
   const backupOutcome = appendConflictBackupStrict(latest, attemptedBaseVersion);
   if (backupOutcome === 'full') {
     // 备份列表已满：保留现有全部备份与当前草稿，云端保持不动，提示用户先处理。
+    // 返回 'limit'：调用方不再叠加通用失败提示（backup-limit 已经是明确的用户指引）。
     emit('backup-limit');
-    return 'failed';
+    return 'limit';
   }
   if (backupOutcome !== 'ok') return 'failed';
   session.version = toVersion(fetched.body.version); // 仅在备份确认成功后采纳云端版本
@@ -359,6 +345,34 @@ async function resolveConflict(attemptedBaseVersion, fetched = null) {
   touchSyncedMeta(session.version);
   clearTabDraft();
   emit('conflict');
+  return 'ok';
+}
+
+// 用户显式恢复最近一份备份写回工作副本。恢复前必须保护当前未同步副本：
+// 有草稿时先把当前工作副本追加进备份列表（容量不足返回 'full' 且什么都不改，
+// 由 UI 提供导出等处理方式；绝不静默覆盖未备份草稿），再用目标备份替换工作
+// 副本并从列表消费该份。返回 'ok'（已恢复）| 'full'（容量不足被阻止）| 'none'。
+export function restoreConflictBackup() {
+  if (!cloudBackend) return 'none';
+  const backups = readConflictBackups();
+  if (!backups.length) return 'none';
+  const target = backups[backups.length - 1];
+  if (!target || !validateLedgerDocument(target.doc)) return 'none';
+  const pending = hasPendingDraft();
+  if (pending) {
+    const current = readCacheDocument();
+    if (!validateLedgerDocument(current)) return 'none';
+    const protectedOutcome = appendConflictBackupStrict(current, draftBaseVersion());
+    if (protectedOutcome === 'full') return 'full';
+    if (protectedOutcome !== 'ok') return 'none'; // 配额/IO 失败：什么都不动，绝不丢副本
+  }
+  cloudBackend.setItem(KEYS.transactions, JSON.stringify(target.doc.transactions));
+  cloudBackend.setItem(KEYS.cards, JSON.stringify(target.doc.cards));
+  cloudBackend.setItem(KEYS.hiddenBuiltInCardIds, JSON.stringify(target.doc.hiddenBuiltInCardIds));
+  const list = readConflictBackups();
+  const targetIndex = pending ? list.length - 2 : list.length - 1; // 追加保护副本后，目标在倒数第二位
+  const remaining = list.filter((_, index) => index !== targetIndex);
+  try { tabStore().setItem(conflictKey(), JSON.stringify(remaining)); } catch { /* 忽略 */ }
   return 'ok';
 }
 
@@ -436,6 +450,7 @@ async function flushCloudSave() {
       const outcome = await resolveConflict(session.version);
       if (outcome === 'changed') emitSessionChanged();
       else if (outcome === 'failed') emit('save-failed');
+      // 'limit'：backup-limit 已发出且草稿保留，不再叠加通用失败提示
       return;
     }
     if (response.status === 403) {
