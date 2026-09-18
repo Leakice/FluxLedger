@@ -44,10 +44,13 @@ function reloadWorkingCopy(){
   deleted.value=null;
 }
 const CONFLICT_NOTICE='Sync conflict — cloud data reloaded. Your unsaved changes were kept as a local backup.';
+const BACKUP_LIMIT_NOTICE='Sync backups are full. Restore your unsaved copies in Data management, then try again.';
+const RESTORE_BLOCKED_NOTICE='Sync backups are full and this page has unsaved changes. Export your data first, then restore copies one by one.';
 const conflictBackupAvailable=ref(false);
 // 云端事件 → UI 反应（云端模块只发事件类型，文案与动作留在 UI 层）。
 const cloudActions={
   'save-failed':()=>'Save failed',
+  'backup-limit':()=>BACKUP_LIMIT_NOTICE,
   'conflict':()=>{reloadWorkingCopy();conflictBackupAvailable.value=true;return CONFLICT_NOTICE;}
 };
 function handleCloudEvent(event){
@@ -58,7 +61,16 @@ function handleCloudEvent(event){
 const offCloudEvent=onCloudEvent(handleCloudEvent);
 onBeforeUnmount(()=>{offCloudEvent();});
 function restoreConflictCopy(){
-  if(restoreConflictBackup()){reloadWorkingCopy();conflictBackupAvailable.value=false;toast('Conflict copy restored. It will sync to the cloud.');}
+  const outcome=restoreConflictBackup();
+  if(outcome==='ok'){
+    reloadWorkingCopy();
+    conflictBackupAvailable.value=hasConflictBackup();
+    toast('Conflict copy restored. It will sync to the cloud.');
+  }else if(outcome==='full'){
+    // 备份已满且本页有未同步草稿：恢复被阻止，草稿安全保留，提示导出处理。
+    conflictBackupAvailable.value=true;
+    toast(RESTORE_BLOCKED_NOTICE);
+  }
 }
 // 退出登录：有未同步草稿或未恢复冲突副本时，先尝试同步（草稿）并保留命名空间
 // （云端数据不动），绝不静默丢弃未保存内容。

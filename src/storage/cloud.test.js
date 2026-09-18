@@ -13,6 +13,7 @@ import {
   conflictBackupCount, getConflictBackup, restoreConflictBackup, flushNow,
   signOutLocalCleanup, __resetForTest,
 } from './cloud.js';
+import { mountApp, clearTrackedTimers } from '../appTestHelpers.js';
 
 const USER_A = 'user-account-a-0001';
 const USER_B = 'user-account-b-0002';
@@ -675,4 +676,85 @@ test('flushNow resolves only after the working copy reached the cloud (or gave u
 
 test('different accounts never share cache keys', () => {
   assert.notEqual(nsKey(USER_A, KEYS.transactions), nsKey(USER_B, KEYS.transactions));
+});
+
+// —— App.vue 接线（组件级）：这些用例防止云端事件到 UI 的映射再次静默脱落 ——
+
+async function mountWithBackups(a, backupCount) {
+  const storage = mapStorage();
+  globalThis.localStorage = storage;
+  await bootstrapCloud({ fetch: a.fetch, debounce: 60000 });
+  if (backupCount > 0) {
+    const backups = Array.from({ length: backupCount }, (_, index) => ({
+      doc: cloudDocument([entry('bak-' + index)]),
+      baseVersion: 1,
+      at: '2026-01-0' + (index + 1) + 'T00:00:00.000Z',
+    }));
+    globalThis.sessionStorage.setItem('fluxledger-conflict-docs-' + uidHash(USER_A), JSON.stringify(backups));
+  }
+  const mounted = await mountApp({ storage });
+  return mounted;
+}
+
+function openDataManager() {
+  document.querySelector('.data-manager-trigger').click();
+}
+
+test('the UI surfaces the backup-limit notice instead of a generic failure', async () => {
+  const a = serverApi(cloudDocument([]), 1);
+  const app = await mountWithBackups(a, 5); // 备份列表已满
+  try {
+    assert.equal(app.state.notification, '', 'no toast on a clean mount');
+    // 服务端推进到 v2，使本页草稿（基 1）的 PUT 落 409 并触达备份上限
+    a.s.data = cloudDocument([entry('remote-v2')]);
+    a.s.version = 2;
+    saveTransactions([entry('limit-edit')]);
+    await flushNow();
+    assert.equal(
+      app.state.notification,
+      'Sync backups are full. Restore your unsaved copies in Data management, then try again.',
+      'the backup-limit notice is shown, not Save failed',
+    );
+    assert.equal(conflictBackupCount(), 5);
+    assert.equal(hasPendingDraft(), true, 'the draft survives under the limit notice');
+  } finally { app.unmount(); clearTrackedTimers(); }
+});
+
+test('a blocked restore shows the export guidance and keeps the restore entry available', async () => {
+  const a = serverApi(cloudDocument([]), 1);
+  const app = await mountWithBackups(a, 5);
+  try {
+    // 服务端推进到 v2，使本页草稿（基 1）的 PUT 落 409 并触达备份上限
+    a.s.data = cloudDocument([entry('remote-v2')]);
+    a.s.version = 2;
+    saveTransactions([entry('limit-edit')]);
+    await flushNow(); // 触发 backup-limit：草稿保留、备份已满
+    openDataManager();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const restoreButton = [...document.querySelectorAll('.data-action')].find(b => b.textContent.includes('Restore unsaved copy'));
+    assert.ok(restoreButton, 'the restore entry is available');
+    restoreButton.click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(
+      app.state.notification,
+      'Sync backups are full and this page has unsaved changes. Export your data first, then restore copies one by one.',
+      'the blocked-restore guidance is shown instead of a success message',
+    );
+    assert.equal(conflictBackupCount(), 5, 'nothing changed');
+    assert.ok([...document.querySelectorAll('.data-action')].some(b => b.textContent.includes('Restore unsaved copy')), 'the restore entry stays available');
+  } finally { app.unmount(); clearTrackedTimers(); }
+});
+
+test('a successful restore keeps the entry while other backups remain', async () => {
+  const a = serverApi(cloudDocument([]), 1);
+  const app = await mountWithBackups(a, 2);
+  try {
+    openDataManager();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    [...document.querySelectorAll('.data-action')].find(b => b.textContent.includes('Restore unsaved copy')).click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(app.state.notification, 'Conflict copy restored. It will sync to the cloud.');
+    assert.equal(conflictBackupCount(), 1);
+    assert.ok([...document.querySelectorAll('.data-action')].some(b => b.textContent.includes('Restore unsaved copy')), 'the entry stays for the remaining backup');
+  } finally { app.unmount(); clearTrackedTimers(); }
 });
