@@ -1,36 +1,40 @@
 // 云端账本会话（PR3）：登录态检测、账户隔离缓存与防抖同步。
 //
 // 架构（本 PR 既定决策，勿在此更改）：
-// - 云端是持久源；本地 localStorage 的 cloud-cache-<uidHash>-<原 key> 命名空间是
-//   账户隔离的同步缓存（=工作副本），App.vue 的同步读写代码与 UI 不感知云端；
+// - 云端是持久源。localStorage 的 cloud-cache-<uidHash>-<原 key> 是「按账户共享的
+//   已同步基础」；sessionStorage 的 fluxledger-draft-* 是「按标签页隔离的工作副本」。
+//   local.js 的同步读写经后端路由：草稿优先、无草稿回落共享——App.vue 不感知云端；
+// - 标签页草稿存 sessionStorage：同账户多标签页互不覆盖各自的未保存修改；
+//   刷新后保留（浏览器按标签页存续），关闭标签页自动清理；
 // - 同步语义三句话：进入页面时读取、修改时保存、回到页面时刷新。
 //
-// 可靠性规则（两轮 review 后的语义，勿回退）：
+// 可靠性规则（多轮 review 后的语义，勿回退）：
 // - 云端 data:null / 首次进入必须显式初始化空文档，绝不允许回落到 seed 演示数据；
-// - draft-meta 携带草稿的基版本（编辑时已知的云端版本）。带草稿启动不做启动 GET、
-//   不把旧草稿 rebase 到新版本：PUT 直接用原基版本，让服务端乐观锁仲裁（可能 409）；
-//   未知基（离线启动就编辑）只在云端为空（version 0）时新建，否则走冲突保护；
-// - 用户一旦修改过工作副本（draft 标记存在），任何 GET 都不得覆盖它。草稿只有
-//   三种归宿：PUT 成功（已同步）、409 冲突（工作副本先备份为可恢复的 conflict-doc，
-//   再转云端状态并通知 UI）、用户显式恢复；
-// - flush 以快照时的编辑序号界定保存范围：PUT 期间到达的编辑保持草稿标记并立即
-//   补跑一次 flush，绝不出现「最新修改未上云但标记已清」；
-// - whoami 网络失败 ≠ 游客：重试后仍未知则进入 unknown 模式（boot 状态旗标 +
-//   App 挂载后提示），绝不静默把云账户用户的修改写进游客原 key；
-// - 每次写/读云端前用 whoami 核对身份；PUT 还携带 expectedUserId 供服务端在
-//   同一请求内做一致性校验（归属仍只由认证头决定），关闭 whoami 与 PUT 之间的切换竞态。
+// - draft-meta 记录草稿基版本。带草稿启动不做启动 GET；上传永远用原基，由服务端
+//   乐观锁仲裁。查询到的远端版本与草稿基版本严格分离：未知基草稿只有在确认云端
+//   为空时才允许新建，否则走冲突保护；保护性查询绝不改写 session.version，
+//   备份失败后保护保持（不会以远端版本重试上传）；
+// - 冲突备份是多份列表（append-only，上限 5 份）：先取云端（不落盘）→ 严格备份
+//   本标签页完整最新工作副本（setItem 异常透传 + 读回校验）→ 确认成功才用云端
+//   覆盖共享基础并清本页草稿。任何一步失败都保留原草稿；
+// - flush 以快照时编辑序号界定保存范围：PUT 期间到达的编辑保持草稿并排队补跑；
+// - PUT 成功才把工作副本提升为共享基础（writeSharedDocument 直写，绕过草稿路由）；
+// - whoami 网络失败 ≠ 游客：unknown 模式（boot 旗标 + App 挂载后提示）；
+// - 身份绑定双保险：每次云端访问前 whoami 核对；PUT 携带 expectedUserId、GET 响应
+//   携带服务端身份回显，均在同一请求内核对，不匹配的数据绝不落盘。
 import { uidHash } from './uidHash.js';
 import { buildLedgerDocument, validateLedgerDocument } from '../../app/ledger-document.js';
 import { KEYS, setSessionBackend } from './local.js';
 
-const CACHE_PREFIX = 'cloud-cache-';
-const DRAFT_KEY = 'draft-meta';       // 命名空间内：存在即「工作副本可能领先云端」，记录基版本
-const CONFLICT_KEY = 'conflict-doc';  // 命名空间内：409 时被云端版本取代前的工作副本备份
-const SYNCED_KEY = 'synced-meta';     // 命名空间内：最近一次与云端确认一致的版本
+const CACHE_PREFIX = 'cloud-cache-';          // localStorage：按账户共享的已同步基础
+const SYNCED_KEY = 'synced-meta';             // 共享命名空间内：最近一次与云端确认一致的版本
+const DRAFT_PREFIX = 'fluxledger-draft-';     // sessionStorage：本标签页的工作副本（按 data key）
+const DRAFT_META_KEY = 'fluxledger-draft-meta';
+const CONFLICT_KEY = 'fluxledger-conflict-docs'; // sessionStorage：本标签页的冲突备份列表
+const MAX_CONFLICT_BACKUPS = 5;
 const DEFAULT_DEBOUNCE_MS = 1200;
 const IDENTITY_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 800;
-const META_KEYS = [DRAFT_KEY, CONFLICT_KEY, SYNCED_KEY];
 const DATA_KEYS = [KEYS.transactions, KEYS.cards, KEYS.hiddenBuiltInCardIds];
 
 const session = { mode: 'guest', userId: null, uidHash: null, version: null, boot: null };
@@ -39,7 +43,6 @@ let cloudFetch = (url, options) => globalThis.fetch(url, options);
 let debounceMs = DEFAULT_DEBOUNCE_MS;
 let retryDelayMs = DEFAULT_RETRY_DELAY_MS;
 let cloudBackend = null;
-let hydrating = false;
 let saveTimer = null;
 let activeFlush = null;
 let flushQueued = false;
@@ -62,6 +65,16 @@ const emitSessionChanged = () => {
   emit('session-changed');
 };
 
+// 标签页草稿存储：sessionStorage（浏览器按标签页隔离、刷新保留、关页自动清理）。
+// 不可用时降级为 localStorage（退化为共享语义，功能仍可用）。
+function tabStore() {
+  try {
+    if (globalThis.sessionStorage) return globalThis.sessionStorage;
+  } catch { /* 某些环境禁用 sessionStorage */
+  }
+  return globalThis.localStorage;
+}
+
 export function currentSession() {
   return session;
 }
@@ -74,76 +87,75 @@ export function onCloudEvent(listener) {
   return () => { listeners = listeners.filter(item => item !== listener); };
 }
 
-// 以原 key 语义包装 localStorage 的命名空间后端；用户写入会标记草稿并防抖 PUT。
-// 元数据键（draft/conflict/synced）不触发 markDirty，由对应流程显式管理。
+// 会话后端：数据键读取「本页草稿优先、无草稿回落共享基础」，写入进本页草稿并
+// 防抖同步。语言/主题不走此后端（local.js 仅对三个数据键启用会话后端）。
+// 草稿键带账户前缀：sessionStorage 正常时浏览器已按标签页隔离；降级到 localStorage
+// 时仍按账户隔离，不会把 A 的草稿影子进 B 的读取。
 function createCloudBackend(prefix) {
-  const storage = () => globalThis.localStorage;
-  const scoped = key => prefix + key;
+  const shared = () => globalThis.localStorage;
+  const tab = tabStore;
+  const draftKey = key => DRAFT_PREFIX + session.uidHash + '-' + key;
   return {
-    getItem: key => storage().getItem(scoped(key)),
-    setItem: (key, value) => {
-      storage().setItem(scoped(key), value);
-      if (!META_KEYS.includes(key)) markDirty();
+    getItem(key) {
+      const shadowed = tab().getItem(draftKey(key));
+      if (shadowed !== null) return shadowed;
+      return shared().getItem(prefix + key);
     },
-    removeItem: key => {
-      storage().removeItem(scoped(key));
-      if (!META_KEYS.includes(key)) markDirty();
+    setItem(key, value) {
+      tab().setItem(draftKey(key), value);
+      markDirty();
+    },
+    removeItem(key) {
+      tab().removeItem(draftKey(key));
     },
   };
 }
 
-const readMeta = key => {
-  if (!cloudBackend) return null;
-  try {
-    const parsed = JSON.parse(cloudBackend.getItem(key));
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
-};
+const draftMetaKey = () => DRAFT_META_KEY + '-' + session.uidHash;
+const conflictKey = () => CONFLICT_KEY + '-' + session.uidHash;
 
-const writeMeta = (key, value) => {
-  if (!cloudBackend) return;
-  try { cloudBackend.setItem(key, JSON.stringify(value)); } catch { /* 存储不可写时由 flush 兜底 */ }
-};
-
-const removeMeta = key => {
-  if (!cloudBackend) return;
-  try { cloudBackend.removeItem(key); } catch { /* 忽略 */ }
-};
-
-const cacheRaw = key => {
+const sharedRaw = key => {
+  if (!session.uidHash) return null;
   try { return globalThis.localStorage.getItem(CACHE_PREFIX + session.uidHash + '-' + key); }
   catch { return null; }
 };
 
-function readCacheDocument() {
+const readCacheDocument = () => {
+  if (!cloudBackend) return buildLedgerDocument([], [], []);
   const read = key => {
-    try { return JSON.parse(cacheRaw(key)) ?? []; }
+    try { return JSON.parse(cloudBackend.getItem(key)) ?? []; }
     catch { return []; }
   };
   return buildLedgerDocument(read(KEYS.transactions), read(KEYS.cards), read(KEYS.hiddenBuiltInCardIds));
-}
+};
 
 function markDraft() {
-  if (!cloudBackend) return;
   const baseVersion = Number.isSafeInteger(session.version) && session.version >= 0
     ? session.version
-    : (readMeta(SYNCED_KEY)?.version ?? null);
-  writeMeta(DRAFT_KEY, { baseVersion, at: new Date().toISOString() });
+    : (syncedVersion() ?? null);
+  try {
+    tabStore().setItem(draftMetaKey(), JSON.stringify({ baseVersion, at: new Date().toISOString() }));
+  } catch { /* 存储不可写时由 flush 的失败路径兜底提示 */ }
 }
 
-function clearDraft() {
-  removeMeta(DRAFT_KEY);
+function clearTabDraft() {
+  try {
+    const tab = tabStore();
+    tab.removeItem(draftMetaKey());
+    for (const key of DATA_KEYS) tab.removeItem(DRAFT_PREFIX + session.uidHash + '-' + key);
+  } catch { /* 忽略 */ }
 }
 
-// 「工作副本可能领先云端」；draft-meta.baseVersion 是编辑时已知的云端版本（可能为 null）。
+// 「本页工作副本可能领先云端」；draft-meta.baseVersion 是编辑时已知的云端版本（可能为 null）。
 export function hasPendingDraft() {
-  return session.mode === 'cloud' && Boolean(cloudBackend) && cloudBackend.getItem(DRAFT_KEY) !== null;
+  if (session.mode !== 'cloud' || !cloudBackend) return false;
+  const tab = tabStore();
+  if (tab.getItem(draftMetaKey()) !== null) return true;
+  return DATA_KEYS.some(key => tab.getItem(DRAFT_PREFIX + session.uidHash + '-' + key) !== null);
 }
 
 function markDirty() {
-  if (hydrating || session.mode !== 'cloud') return;
+  if (session.mode !== 'cloud') return;
   editSeq += 1;
   markDraft();
   clearTimeout(saveTimer);
@@ -153,41 +165,34 @@ function markDirty() {
   }, debounceMs);
 }
 
-// 云端数据落盘（注水/冲突重载）：内容来自云端，不标记草稿、不触发 PUT。
-function writeDocumentToCache(data) {
-  hydrating = true;
-  try {
-    cloudBackend.setItem(KEYS.transactions, JSON.stringify(data.transactions));
-    cloudBackend.setItem(KEYS.cards, JSON.stringify(data.cards));
-    cloudBackend.setItem(KEYS.hiddenBuiltInCardIds, JSON.stringify(data.hiddenBuiltInCardIds));
-  } finally {
-    hydrating = false;
-  }
+// 把文档写入「按账户共享的已同步基础」（绕过草稿路由；不触发 markDirty）。
+function writeSharedDocument(data) {
+  if (!session.uidHash) return;
+  const shared = () => globalThis.localStorage;
+  shared().setItem(CACHE_PREFIX + session.uidHash + '-' + KEYS.transactions, JSON.stringify(data.transactions));
+  shared().setItem(CACHE_PREFIX + session.uidHash + '-' + KEYS.cards, JSON.stringify(data.cards));
+  shared().setItem(CACHE_PREFIX + session.uidHash + '-' + KEYS.hiddenBuiltInCardIds, JSON.stringify(data.hiddenBuiltInCardIds));
 }
 
-function initEmptyDocument() {
-  writeDocumentToCache(buildLedgerDocument([], [], []));
-  clearDraft();
-}
-
-function touchSyncedMeta(version) {
-  if (Number.isSafeInteger(version) && version >= 0) writeMeta(SYNCED_KEY, { version, at: new Date().toISOString() });
+const toVersion = value => {
+  if (value === null || value === undefined) return null; // Number(null) 是 0：未知绝不能变成「基版本 0」
+  const version = Number(value);
+  return Number.isSafeInteger(version) && version >= 0 ? version : null;
 }
 
 const syncedVersion = () => {
-  const version = Number(readMeta(SYNCED_KEY)?.version);
-  return Number.isSafeInteger(version) && version >= 0 ? version : null;
+  if (!session.uidHash) return null;
+  let meta = null;
+  try { meta = JSON.parse(sharedRaw(SYNCED_KEY)); } catch { return null; }
+  return toVersion(meta && meta.version);
 };
 
 const draftBaseVersion = () => {
-  const raw = readMeta(DRAFT_KEY)?.baseVersion;
+  let meta = null;
+  try { meta = JSON.parse(tabStore().getItem(draftMetaKey())); } catch { return null; }
+  const raw = meta ? meta.baseVersion : null;
   if (raw === null || raw === undefined) return null;
   const version = Number(raw);
-  return Number.isSafeInteger(version) && version >= 0 ? version : null;
-};
-
-const toVersion = value => {
-  const version = Number(value);
   return Number.isSafeInteger(version) && version >= 0 ? version : null;
 };
 
@@ -245,64 +250,93 @@ async function fetchCloudDocument() {
   }
 }
 
-// 建立基线版本。绝不写工作副本（草稿与用户状态不可被 GET 丢弃）。
-// 返回 'ok' | 'changed' | 'failed'；版本写入 session.version。
+// 建立基线版本：只查询、不采纳。session.version 只能来自「草稿基版本」「云端为空(0)」
+// 或「冲突解决成功后的云端版本」，否则未知基保护会被意外解除。
+// 返回 'ok'(含 version) | 'changed' | 'failed'。
 async function establishVersion() {
   const fetched = await fetchCloudDocument();
   if (fetched === 'changed' || fetched === 'failed') return fetched;
-  session.version = toVersion(fetched.body.version);
-  return 'ok';
+  return { status: 'ok', version: toVersion(fetched.body.version) };
 }
 
-// 冲突备份：严格写入（配额/IO 失败或读回不符都判失败），成功才算数。
-function writeConflictBackupStrict(doc, baseVersion) {
-  if (!cloudBackend) return false;
+// 冲突备份：多份 append-only 列表（上限 MAX_CONFLICT_BACKUPS，溢出丢弃最旧），
+// 严格写入（异常透传）+ 读回校验，成功才算数。
+function appendConflictBackupStrict(doc, baseVersion) {
+  const tab = tabStore();
+  let existing = [];
   try {
-    const value = JSON.stringify({ doc, baseVersion, at: new Date().toISOString() });
-    cloudBackend.setItem(CONFLICT_KEY, value);
-    return cloudBackend.getItem(CONFLICT_KEY) === value; // 写后读回校验
+    const parsed = JSON.parse(tab.getItem(conflictKey()));
+    if (Array.isArray(parsed)) existing = parsed;
+  } catch { /* 损坏视为空列表 */ }
+  existing.push({ doc, baseVersion, at: new Date().toISOString() });
+  while (existing.length > MAX_CONFLICT_BACKUPS) existing.shift();
+  try {
+    const value = JSON.stringify(existing);
+    tab.setItem(conflictKey(), value);            // 配额/IO 异常必须就地消化
+    return tab.getItem(conflictKey()) === value;  // 写后读回校验
   } catch {
     return false;
   }
 }
 
-// 409 / 未知基的冲突解决。顺序不可变：先取云端（不落盘）→ 备份缓存中「完整最新草稿」
-// （含慢 PUT 期间的新编辑）且确认写成功 → 才允许用云端覆盖工作副本。任何一步失败都
-// 保留原草稿并报失败，绝不丢弃唯一未保存副本、绝不静默覆盖云端。
-// 返回 'ok'（已发 conflict 事件）| 'changed' | 'failed'。
-async function resolveConflict(attemptedBaseVersion) {
-  const fetched = await fetchCloudDocument();
-  if (fetched === 'changed' || fetched === 'failed') return fetched;
-  const latest = readCacheDocument();
-  if (!validateLedgerDocument(latest)) return 'failed';
-  if (!writeConflictBackupStrict(latest, attemptedBaseVersion)) return 'failed';
-  session.version = toVersion(fetched.body.version);
-  if (fetched.body.data && validateLedgerDocument(fetched.body.data)) writeDocumentToCache(fetched.body.data);
-  else initEmptyDocument();
-  touchSyncedMeta(session.version);
-  clearDraft();
-  emit('conflict');
-  return 'ok';
-}
+const readConflictBackups = () => {
+  try {
+    const parsed = JSON.parse(tabStore().getItem(conflictKey()));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
 
 export function hasConflictBackup() {
-  return session.mode === 'cloud' && Boolean(cloudBackend) && cloudBackend.getItem(CONFLICT_KEY) !== null;
+  return session.mode === 'cloud' && readConflictBackups().length > 0;
+}
+
+export function conflictBackupCount() {
+  return session.mode === 'cloud' ? readConflictBackups().length : 0;
 }
 
 export function getConflictBackup() {
-  if (!cloudBackend) return null;
-  const meta = readMeta(CONFLICT_KEY);
-  return meta && validateLedgerDocument(meta.doc) ? meta : null;
+  const backups = readConflictBackups();
+  const latest = backups[backups.length - 1];
+  return latest && validateLedgerDocument(latest.doc) ? latest : null;
 }
 
-// 用户显式恢复：把冲突备份写回工作副本并标记草稿（基版本 = 当前云端版本，随下一次 flush 上传）。
+// 用户显式恢复：弹出最近一份备份写回工作副本（草稿路由，基版本 = 当前云端版本）。
+// 更早的备份保留在列表中，可继续逐份恢复。
 export function restoreConflictBackup() {
-  const backup = getConflictBackup();
-  if (!backup) return false;
-  writeDocumentToCache(backup.doc);
-  removeMeta(CONFLICT_KEY);
-  markDirty();
+  const backups = readConflictBackups();
+  if (!backups.length) return false;
+  const backup = backups[backups.length - 1];
+  if (!backup || !validateLedgerDocument(backup.doc)) return false;
+  cloudBackend.setItem(KEYS.transactions, JSON.stringify(backup.doc.transactions));
+  cloudBackend.setItem(KEYS.cards, JSON.stringify(backup.doc.cards));
+  cloudBackend.setItem(KEYS.hiddenBuiltInCardIds, JSON.stringify(backup.doc.hiddenBuiltInCardIds));
+  const remaining = backups.slice(0, -1);
+  try { tabStore().setItem(conflictKey(), JSON.stringify(remaining)); } catch { /* 忽略 */ }
   return true;
+}
+
+// 409 / 未知基的冲突解决。顺序不可变：先取云端（不落盘）→ 严格备份本页完整最新
+// 工作副本（含慢 PUT 期间的新编辑，写成功才算）→ 确认成功才用云端覆盖共享基础、
+// 清本页草稿并通知 UI 重载。备份失败：共享基础与本页草稿都原样保留，只报失败——
+// session.version 不被改动，未知基保护在下一次重试时继续保持。
+// 返回 'ok'（已发 conflict 事件）| 'changed' | 'failed'。
+async function resolveConflict(attemptedBaseVersion, fetched = null) {
+  if (!fetched) {
+    fetched = await fetchCloudDocument();
+    if (fetched === 'changed' || fetched === 'failed') return fetched;
+  }
+  const latest = readCacheDocument();
+  if (!validateLedgerDocument(latest)) return 'failed';
+  if (!appendConflictBackupStrict(latest, attemptedBaseVersion)) return 'failed';
+  session.version = toVersion(fetched.body.version); // 仅在备份确认成功后采纳云端版本
+  if (fetched.body.data && validateLedgerDocument(fetched.body.data)) writeSharedDocument(fetched.body.data);
+  else writeSharedDocument(buildLedgerDocument([], [], []));
+  touchSyncedMeta(session.version);
+  clearTabDraft();
+  emit('conflict');
+  return 'ok';
 }
 
 async function flushCloudSave() {
@@ -326,24 +360,26 @@ async function flushCloudSave() {
   }
 
   if (session.version === null) {
-    // 基线未知（离线启动且无同步记录，或未知基草稿）：先取云端基线。
-    const established = await establishVersion();
-    if (established === 'changed') { emitSessionChanged(); return; }
-    if (established === 'failed') { emit('save-failed'); return; }
+    // 基线未知（离线启动且无同步记录，或未知基草稿）：只查询远端版本，不采纳。
+    const fetched = await fetchCloudDocument();
+    if (fetched === 'changed') { emitSessionChanged(); return; }
+    if (fetched === 'failed') { emit('save-failed'); return; }
+    const remoteVersion = toVersion(fetched.body.version);
     const draftBase = draftBaseVersion();
     if (draftBase !== null) {
       // 草稿有自己的基版本：用原基上传，由服务端乐观锁仲裁（云端已前进则 409 走冲突保护），
       // 绝不把旧草稿 rebase 到最新版本。
       session.version = draftBase;
-    } else if (session.version > 0) {
-      // 未知基草稿 + 云端已有数据：无法判定草稿是否基于旧数据，按冲突保护处理
-      // （备份最新工作副本 → 工作副本转为云端状态 → 用户可显式恢复）。
-      const outcome = await resolveConflict(null);
+    } else if (remoteVersion > 0) {
+      // 未知基草稿 + 云端已有数据：无法判定草稿是否基于旧数据，按冲突保护处理。
+      // 备份失败时 session.version 保持 null，下一次重试继续走本保护分支。
+      const outcome = await resolveConflict(null, fetched);
       if (outcome === 'changed') emitSessionChanged();
       else if (outcome === 'failed') emit('save-failed');
       return;
+    } else {
+      session.version = 0; // 云端为空：草稿以新建身份上传
     }
-    // session.version === 0：云端为空，草稿以新建身份上传。
   }
 
   try {
@@ -361,14 +397,19 @@ async function flushCloudSave() {
         session.version = version;
         touchSyncedMeta(version);
       }
-      if (seqAtSnapshot === editSeq) clearDraft();
-      else markDraft(); // 快照之后又有编辑：保持草稿标记，由排队的补跑 flush 继续
+      if (seqAtSnapshot === editSeq) {
+        // 快照后没有新编辑：工作副本提升为共享基础，清本页草稿。
+        writeSharedDocument(payload);
+        clearTabDraft();
+      } else {
+        markDraft(); // 快照之后又有编辑：保持草稿标记，由排队的补跑 flush 继续
+      }
       return;
     }
     if (response.status === 409) {
       // 乐观锁冲突：云端有更新的版本。解决顺序（不可变）：
-      // 取云端（不落盘）→ 备份缓存中的完整最新草稿（含慢 PUT 期间的新编辑，写成功才算）
-      // → 才用云端覆盖工作副本并通知 UI 重载。备份失败则草稿原样保留、绝不覆盖。
+      // 取云端（不落盘）→ 备份本页完整最新工作副本（含慢 PUT 期间的新编辑，写成功才算）
+      // → 才用云端覆盖共享基础并通知 UI 重载。备份失败则草稿原样保留、绝不覆盖。
       const outcome = await resolveConflict(session.version);
       if (outcome === 'changed') emitSessionChanged();
       else if (outcome === 'failed') emit('save-failed');
@@ -440,49 +481,50 @@ export async function bootstrapCloud({ fetch = defaultFetch, debounce: debounceO
   cloudBackend = createCloudBackend(CACHE_PREFIX + session.uidHash + '-');
   setSessionBackend(cloudBackend);
 
-  const draft = readMeta(DRAFT_KEY);
-  if (draft && draft.baseVersion !== undefined) {
-    // 离线草稿优先：保留工作副本；版本 = 草稿基版本（服务端会仲裁），不做启动 GET。
-    session.version = toVersion(draft.baseVersion);
+  if (hasPendingDraft()) {
+    // 本页离线草稿优先：工作副本（sessionStorage 草稿）保留，不做启动 GET；
+    // 版本 = 草稿基版本（服务端会仲裁），绝不以远端最新版本 rebase 旧草稿。
+    session.version = draftBaseVersion();
     session.boot = 'ok';
     return session;
   }
   // 空账户/首次进入：显式初始化空文档。绝不允许 App 回落到 seed 演示数据。
-  if (DATA_KEYS.every(key => cacheRaw(key) === null)) initEmptyDocument();
-  try {
-    const response = await cloudFetch('/api/ledger', { headers: { accept: 'application/json' } });
-    if (response.status === 401) {
-      resetToGuest();
-      return session;
-    }
-    if (!response.ok) {
-      // 离线启动：无草稿时工作副本即上次同步状态，可沿用其版本作为基线。
-      session.version = syncedVersion();
-      session.boot = 'offline';
-      return session;
-    }
-    const body = await response.json().catch(() => null);
-    if (typeof body?.userId === 'string' && body.userId !== session.userId) {
-      // whoami 通过后、GET 返回前会话已切换：云端数据属于另一账号，绝不写入本命名空间。
-      // 工作副本保持本地状态、版本沿用上次同步记录；下一次保存的身份门会收敛（session-changed）。
-      session.version = syncedVersion();
-      session.boot = 'offline';
-      return session;
-    }
-    session.version = toVersion(body && body.version);
-    if (body && body.data && validateLedgerDocument(body.data)) {
-      writeDocumentToCache(body.data);
-    } else {
-      initEmptyDocument(); // data:null → 空账本（云端是持久源，不从 seed 起步）
-    }
-    touchSyncedMeta(session.version);
-    clearDraft();
-    session.boot = 'ok';
-  } catch {
+  if (DATA_KEYS.every(key => sharedRaw(key) === null)) {
+    writeSharedDocument(buildLedgerDocument([], [], []));
+  }
+  const fetched = await fetchCloudDocument(); // 含 whoami 门 + 响应身份回显核对
+  if (fetched === 'changed') {
+    // whoami 与 GET 之间会话已切换：云端数据属于另一账号，绝不写入本命名空间。
+    // 工作副本保持本地状态、版本沿用上次同步记录；下一次保存的身份门会收敛。
     session.version = syncedVersion();
     session.boot = 'offline';
+    return session;
   }
+  if (fetched === 'failed') {
+    // 离线启动：无草稿时共享基础即上次同步状态，可沿用其版本作为基线。
+    session.version = syncedVersion();
+    session.boot = 'offline';
+    return session;
+  }
+  session.version = toVersion(fetched.body.version);
+  if (fetched.body.data && validateLedgerDocument(fetched.body.data)) {
+    writeSharedDocument(fetched.body.data);
+  } else {
+    writeSharedDocument(buildLedgerDocument([], [], [])); // data:null → 空账本（不从 seed 起步）
+  }
+  touchSyncedMeta(session.version);
+  clearTabDraft();
+  session.boot = 'ok';
   return session;
+}
+
+function touchSyncedMeta(version) {
+  if (!session.uidHash) return;
+  if (Number.isSafeInteger(version) && version >= 0) {
+    try {
+      globalThis.localStorage.setItem(CACHE_PREFIX + session.uidHash + '-' + SYNCED_KEY, JSON.stringify({ version, at: new Date().toISOString() }));
+    } catch { /* 忽略 */ }
+  }
 }
 
 function resetToGuest() {
@@ -497,35 +539,50 @@ function resetToGuest() {
   session.boot = null;
 }
 
-// 退出登录（App.vue 的退出链接点击时调用）：清账户命名空间缓存（含草稿/冲突副本），
-// 云端数据不动；平台 /signout-with-chatgpt 路由随后整页跳转回游客模式。
-// App.vue 会在有未同步草稿或未恢复冲突副本时保留命名空间，绝不静默丢弃未保存内容。
+// 退出登录（App.vue 的退出链接点击时调用）：清共享基础（按账户）与本页草稿/冲突备份
+// （sessionStorage），云端数据不动；平台 /signout-with-chatgpt 路由随后整页跳转回游客
+// 模式。其他标签页的草稿在其自身会话里，不受影响。App.vue 会在有未同步草稿或未恢复
+// 冲突备份时保留命名空间，绝不静默丢弃未保存内容。
 export function signOutLocalCleanup() {
   clearTimeout(saveTimer);
   saveTimer = null;
   const prefix = CACHE_PREFIX + session.uidHash + '-';
   if (session.uidHash) {
-    const storage = () => globalThis.localStorage;
+    const shared = () => globalThis.localStorage;
     const doomed = [];
-    for (let index = 0; index < storage().length; index += 1) {
-      const key = storage().key(index);
+    for (let index = 0; index < shared().length; index += 1) {
+      const key = shared().key(index);
       if (key !== null && key.startsWith(prefix)) doomed.push(key);
     }
-    for (const key of doomed) storage().removeItem(key);
+    for (const key of doomed) shared().removeItem(key);
   }
+  try {
+    const tab = tabStore();
+    tab.removeItem(draftMetaKey());
+    tab.removeItem(conflictKey());
+    for (const key of DATA_KEYS) tab.removeItem(DRAFT_PREFIX + session.uidHash + '-' + key);
+  } catch { /* 忽略 */ }
   resetToGuest();
 }
 
 // 仅测试用：恢复模块级会话状态，避免用例间串扰。
-export function __resetForTest() {
+export function __resetForTest({ keepTabStorage = false } = {}) {
   clearTimeout(saveTimer);
   saveTimer = null;
   activeFlush = null;
   flushQueued = false;
-  hydrating = false;
   editSeq = 0;
   identityChanged = false;
   listeners = [];
+  // 清本会话在标签页存储里的草稿/备份（多标签页用例可用 keepTabStorage 保留现场）。
+  if (!keepTabStorage && session.uidHash) {
+    try {
+      const tab = tabStore();
+      tab.removeItem(draftMetaKey());
+      tab.removeItem(conflictKey());
+      for (const key of DATA_KEYS) tab.removeItem(DRAFT_PREFIX + session.uidHash + '-' + key);
+    } catch { /* 忽略 */ }
+  }
   setSessionBackend(null);
   cloudBackend = null;
   cloudFetch = (url, options) => globalThis.fetch(url, options);
